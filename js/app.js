@@ -838,8 +838,8 @@ function renderAnalysis() {
     '<div class="stat-card"><div class="label">淨收支</div><div class="value ' + (tI - tE >= 0 ? 'c-green' : 'c-red') + '">' + fmt(tI - tE, cur) + '</div></div>' +
     '<div class="stat-card"><div class="label">儲蓄率</div><div class="value c-primary">' + sr.toFixed(1) + '%</div></div>';
 
-  drawPie('expPieChart', 'expPieLegend', groupByCategory(exp, cur));
-  drawPie('incPieChart', 'incPieLegend', groupByCategory(inc, cur));
+  drawPie('expPieChart', 'expPieLegend', groupByCategory(exp, cur), cur);
+  drawPie('incPieChart', 'incPieLegend', groupByCategory(inc, cur), cur);
   drawBarChart('expBarChart', groupByCategory(exp, cur), cur);
   drawMonthlyChart(cur);
 }
@@ -906,7 +906,7 @@ function renderAssetAnalysisSection() {
     posMap[label] = (posMap[label] || 0) + convert(a.balance, a.currency, cur);
   });
   drawPie('aasTypePie', 'aasTypeLegend',
-    Object.entries(posMap).sort(function(a, b) { return b[1] - a[1]; })
+    Object.entries(posMap).sort(function(a, b) { return b[1] - a[1]; }), cur
   );
 
   // 幣別分佈圓餅圖
@@ -916,7 +916,7 @@ function renderAssetAnalysisSection() {
     curMap[label] = (curMap[label] || 0) + convert(Math.abs(a.balance), a.currency, cur);
   });
   drawPie('aasCurPie', 'aasCurLegend',
-    Object.entries(curMap).sort(function(a, b) { return b[1] - a[1]; })
+    Object.entries(curMap).sort(function(a, b) { return b[1] - a[1]; }), cur
   );
 
   // Bug 3：負債圓餅圖
@@ -926,7 +926,7 @@ function renderAssetAnalysisSection() {
     debtMap[label] = (debtMap[label] || 0) + convert(Math.abs(a.balance), a.currency, cur);
   });
   drawPie('aasDebtPie', 'aasDebtLegend',
-    Object.entries(debtMap).sort(function(a, b) { return b[1] - a[1]; })
+    Object.entries(debtMap).sort(function(a, b) { return b[1] - a[1]; }), cur
   );
 
   // Bug 3：應付款圓餅圖
@@ -936,14 +936,30 @@ function renderAssetAnalysisSection() {
     payMap[label] = (payMap[label] || 0) + convert(Math.abs(a.balance), a.currency, cur);
   });
   drawPie('aasPayPie', 'aasPayLegend',
-    Object.entries(payMap).sort(function(a, b) { return b[1] - a[1]; })
+    Object.entries(payMap).sort(function(a, b) { return b[1] - a[1]; }), cur
   );
 
-  // 各帳戶餘額排行
+  // 各帳戶餘額排行（排除信用卡、未收款、應付款）
   drawBarChart('aasAcctBar',
-    d.accounts.filter(function(a) { return a.type !== 'receivable' && a.type !== 'payable'; })
+    d.accounts.filter(function(a) { return a.type !== 'credit' && a.type !== 'receivable' && a.type !== 'payable'; })
     .map(function(a) {
       return [a.name + ' (' + a.currency + ')', convert(a.balance, a.currency, cur)];
+    }).sort(function(a, b) { return b[1] - a[1]; }),
+    cur
+  );
+
+  // 信用卡負債排行（橫條圖）
+  drawBarChart('aasDebtBar',
+    creditAccts.map(function(a) {
+      return [a.name + ' (' + a.currency + ')', convert(Math.abs(a.balance), a.currency, cur)];
+    }).sort(function(a, b) { return b[1] - a[1]; }),
+    cur
+  );
+
+  // 應付款排行（橫條圖）
+  drawBarChart('aasPayBar',
+    payableAccts.map(function(a) {
+      return [a.name + ' (' + a.currency + ')', convert(Math.abs(a.balance), a.currency, cur)];
     }).sort(function(a, b) { return b[1] - a[1]; }),
     cur
   );
@@ -1165,7 +1181,7 @@ function groupByCategory(list, cur) {
   return Object.entries(map).sort(function(a, b) { return b[1] - a[1]; });
 }
 
-function drawPie(cid, lid, data) {
+function drawPie(cid, lid, data, cur) {
   var cv = document.getElementById(cid);
   var lg = document.getElementById(lid);
   if (!cv || !lg) return;
@@ -1192,10 +1208,11 @@ function drawPie(cid, lid, data) {
   ctx.beginPath(); ctx.arc(90, 90, 40, 0, Math.PI * 2);
   ctx.fillStyle = hc; ctx.fill();
   lg.innerHTML = data.slice(0, 8).map(function(d, i) {
+    var amtStr = cur ? fmt(d[1], cur) : '';
     return '<div class="pie-legend-item"><div class="pie-legend-dot" style="background:' +
       PIE_COLORS[i % PIE_COLORS.length] + '"></div><span><span class="cat-icon">' +
       getIcon(d[0]) + '</span>' + d[0] + '</span><span style="color:var(--text3);margin-left:auto">' +
-      (d[1] / total * 100).toFixed(1) + '%</span></div>';
+      (amtStr ? amtStr + ' ' : '') + (d[1] / total * 100).toFixed(1) + '%</span></div>';
   }).join('');
 }
 
