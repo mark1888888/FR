@@ -1030,104 +1030,104 @@ async function loadStocks() {
     return;
   }
   el.innerHTML = '<p style="color:var(--text3)">載入股價中...</p>';
-  var results = [];
-  var yahooSuccess = false;
 
-  // 方法 1：Yahoo Finance via CORS proxy
-  try {
-    var promises = d.watchStocks.map(function(code) {
-      var url = 'https://corsproxy.io/?url=https://query1.finance.yahoo.com/v8/finance/chart/' + code + '.TW?interval=1d&range=5d';
-      return fetch(url).then(function(r) { return r.json(); }).then(function(data) {
-        if (data.chart && data.chart.result && data.chart.result[0]) {
-          var meta = data.chart.result[0].meta;
-          var price = meta.regularMarketPrice || 0;
-          var prevClose = meta.chartPreviousClose || 0;
-          var change = price - prevClose;
-          var pct = prevClose ? ((change / prevClose) * 100) : 0;
-          return { code: code, name: meta.shortName || meta.symbol || code, price: price, change: change, pct: pct };
-        }
-        return { code: code, name: code, price: 0, change: 0, pct: 0, failed: true };
-      }).catch(function() {
-        return { code: code, name: code, price: 0, change: 0, pct: 0, failed: true };
-      });
+  // 輔助：將 TWSE msgArray 轉換為統一格式
+  function parseTWSE(msgArray) {
+    return msgArray.map(function(s) {
+      var price = parseFloat(s.z) || parseFloat(s.y) || 0;
+      var yesterday = parseFloat(s.y) || 0;
+      var change = price - yesterday;
+      var pct = yesterday ? ((change / yesterday) * 100) : 0;
+      return { code: s.c, name: s.n || s.c, price: price, change: change, pct: pct };
     });
-    results = await Promise.all(promises);
-    var successCount = results.filter(function(r) { return !r.failed; }).length;
-    if (successCount > 0) {
-      yahooSuccess = true;
-      el.innerHTML = results.map(function(s) {
-        if (s.failed) {
-          return '<div class="stock-card"><div><div class="stock-name">' + s.code +
-            '</div><div class="stock-code">' + s.code + '.TW</div></div>' +
-            '<div style="text-align:right"><div class="stock-price" style="color:var(--text3)">--</div>' +
-            '<div style="font-size:11px;color:var(--text3)">無法載入</div></div>' +
-            '<span class="del-btn" onclick="removeStock(\'' + s.code + '\')" style="margin-left:12px">✕</span></div>';
-        }
-        var up = s.change >= 0;
-        return '<div class="stock-card"><div><div class="stock-name">' + s.name +
-          '</div><div class="stock-code">' + s.code + '.TW</div></div>' +
-          '<div style="text-align:right"><div class="stock-price">' + (s.price ? s.price.toFixed(2) : '--') +
-          '</div><div class="stock-change ' + (up ? 'c-green' : 'c-red') + '">' +
-          (up ? '+' : '') + s.change.toFixed(2) + ' (' + (up ? '+' : '') + s.pct.toFixed(2) + '%)</div></div>' +
-          '<span class="del-btn" onclick="removeStock(\'' + s.code + '\')" style="margin-left:12px" title="移除追蹤">✕</span></div>';
-      }).join('');
-      return;
-    }
-  } catch (e) { /* 靜默處理 */ }
-
-  // 方法 2：TWSE 上市（fallback）
-  if (!yahooSuccess) {
-    try {
-      var r = await fetch('https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=' +
-        d.watchStocks.map(function(c) { return 'tse_' + c + '.tw'; }).join('|') +
-        '&json=1&_=' + Date.now());
-      var data = await r.json();
-      if (data.msgArray && data.msgArray.length) {
-        el.innerHTML = data.msgArray.map(function(s) {
-          var price = parseFloat(s.z) || parseFloat(s.y) || 0;
-          var yesterday = parseFloat(s.y) || 0;
-          var change = price - yesterday;
-          var pct = yesterday ? ((change / yesterday) * 100) : 0;
-          var up = change >= 0;
-          return '<div class="stock-card"><div><div class="stock-name">' + (s.n || s.c) +
-            '</div><div class="stock-code">' + s.c + '.TW</div></div>' +
-            '<div style="text-align:right"><div class="stock-price">' + (price ? price.toFixed(2) : '--') +
-            '</div><div class="stock-change ' + (up ? 'c-green' : 'c-red') + '">' +
-            (up ? '+' : '') + change.toFixed(2) + ' (' + (up ? '+' : '') + pct.toFixed(2) + '%)</div></div>' +
-            '<span class="del-btn" onclick="removeStock(\'' + s.c + '\')" style="margin-left:12px" title="移除追蹤">✕</span></div>';
-        }).join('');
-        return;
-      }
-    } catch (e) { /* 靜默處理 */ }
   }
 
-  // 方法 3：OTC 上櫃（fallback）
-  try {
-    var r2 = await fetch('https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=' +
-      d.watchStocks.map(function(c) { return 'otc_' + c + '.tw'; }).join('|') +
-      '&json=1&_=' + Date.now());
-    var data2 = await r2.json();
-    if (data2.msgArray && data2.msgArray.length) {
-      el.innerHTML = data2.msgArray.map(function(s) {
-        var price = parseFloat(s.z) || parseFloat(s.y) || 0;
-        var yesterday = parseFloat(s.y) || 0;
-        var change = price - yesterday;
-        var pct = yesterday ? ((change / yesterday) * 100) : 0;
-        var up = change >= 0;
-        return '<div class="stock-card"><div><div class="stock-name">' + (s.n || s.c) +
-          '</div><div class="stock-code">' + s.c + '.TW</div></div>' +
-          '<div style="text-align:right"><div class="stock-price">' + (price ? price.toFixed(2) : '--') +
-          '</div><div class="stock-change ' + (up ? 'c-green' : 'c-red') + '">' +
-          (up ? '+' : '') + change.toFixed(2) + ' (' + (up ? '+' : '') + pct.toFixed(2) + '%)</div></div>' +
-          '<span class="del-btn" onclick="removeStock(\'' + s.c + '\')" style="margin-left:12px" title="移除追蹤">✕</span></div>';
+  // 輔助：渲染股票卡片
+  function renderCards(results, failedCodes) {
+    var html = results.map(function(s) {
+      var up = s.change >= 0;
+      return '<div class="stock-card"><div><div class="stock-name">' + s.name +
+        '</div><div class="stock-code">' + s.code + '.TW</div></div>' +
+        '<div style="text-align:right"><div class="stock-price">' + (s.price ? s.price.toFixed(2) : '--') +
+        '</div><div class="stock-change ' + (up ? 'c-green' : 'c-red') + '">' +
+        (up ? '+' : '') + s.change.toFixed(2) + ' (' + (up ? '+' : '') + s.pct.toFixed(2) + '%)</div></div>' +
+        '<span class="del-btn" onclick="removeStock(\'' + s.code + '\')" style="margin-left:12px" title="移除追蹤">✕</span></div>';
+    }).join('');
+    // 對未取得資料的股票顯示提示
+    if (failedCodes && failedCodes.length) {
+      html += failedCodes.map(function(c) {
+        return '<div class="stock-card"><div><div class="stock-name">' + c +
+          '</div><div class="stock-code">' + c + '.TW</div></div>' +
+          '<div style="text-align:right"><div class="stock-price" style="color:var(--text3)">--</div>' +
+          '<div style="font-size:11px;color:var(--text3)">無法載入</div></div>' +
+          '<span class="del-btn" onclick="removeStock(\'' + c + '\')" style="margin-left:12px">✕</span></div>';
       }).join('');
-      return;
+    }
+    return html;
+  }
+
+  var allResults = [];
+  var loadedCodes = [];
+
+  // 方法 1：TWSE 上市（主要）— 同時查詢 tse 與 otc
+  try {
+    var tseQuery = d.watchStocks.map(function(c) { return 'tse_' + c + '.tw'; }).join('|');
+    var otcQuery = d.watchStocks.map(function(c) { return 'otc_' + c + '.tw'; }).join('|');
+    var fullQuery = tseQuery + '|' + otcQuery;
+    var r = await fetch('https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=' + fullQuery + '&json=1&_=' + Date.now());
+    var data = await r.json();
+    if (data.msgArray && data.msgArray.length) {
+      var parsed = parseTWSE(data.msgArray);
+      // 去重：同一股票代號若 tse 與 otc 都有回傳，保留有價格的那筆
+      var seen = {};
+      parsed.forEach(function(s) {
+        if (!seen[s.code] || (s.price > 0 && !seen[s.code].price)) {
+          seen[s.code] = s;
+        }
+      });
+      allResults = Object.values(seen).filter(function(s) { return s.price > 0; });
+      loadedCodes = allResults.map(function(s) { return s.code; });
     }
   } catch (e) { /* 靜默處理 */ }
 
-  // 備用：顯示提示
+  // 方法 2：針對未成功的股票，分別嘗試 tse 再 otc（個別查詢 fallback）
+  if (loadedCodes.length < d.watchStocks.length) {
+    var remaining = d.watchStocks.filter(function(c) { return loadedCodes.indexOf(c) === -1; });
+    for (var i = 0; i < remaining.length; i++) {
+      var code = remaining[i];
+      try {
+        var r1 = await fetch('https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_' + code + '.tw&json=1&_=' + Date.now());
+        var d1 = await r1.json();
+        if (d1.msgArray && d1.msgArray.length) {
+          var p = parseTWSE(d1.msgArray);
+          if (p[0] && p[0].price > 0) { allResults.push(p[0]); loadedCodes.push(code); continue; }
+        }
+      } catch (e) { /* 靜默處理 */ }
+      try {
+        var r2 = await fetch('https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=otc_' + code + '.tw&json=1&_=' + Date.now());
+        var d2 = await r2.json();
+        if (d2.msgArray && d2.msgArray.length) {
+          var p2 = parseTWSE(d2.msgArray);
+          if (p2[0] && p2[0].price > 0) { allResults.push(p2[0]); loadedCodes.push(code); continue; }
+        }
+      } catch (e) { /* 靜默處理 */ }
+    }
+  }
+
+  // 有成功取得至少一筆 → 渲染
+  if (allResults.length > 0) {
+    var failedCodes = d.watchStocks.filter(function(c) { return loadedCodes.indexOf(c) === -1; });
+    // 按照原始追蹤順序排列
+    allResults.sort(function(a, b) {
+      return d.watchStocks.indexOf(a.code) - d.watchStocks.indexOf(b.code);
+    });
+    el.innerHTML = renderCards(allResults, failedCodes);
+    return;
+  }
+
+  // 全部失敗：顯示提示
   el.innerHTML = '<div style="background:rgba(245,158,11,.1);border:1px solid var(--orange);border-radius:12px;padding:16px;margin-bottom:16px;font-size:13px;color:var(--orange)">' +
-    '<strong>提示：</strong>股價 API 暫時無法連線，請稍後再試。</div>' +
+    '<strong>提示：</strong>股價 API 暫時無法連線（資料來源：臺灣證交所 TWSE），請稍後再試。</div>' +
     d.watchStocks.map(function(c) {
       return '<div class="stock-card"><div><div class="stock-name">' + c +
         '</div><div class="stock-code">' + c + '.TW</div></div>' +
