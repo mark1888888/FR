@@ -364,6 +364,12 @@ html.light .theme-toggle .toggle-thumb{left:20px}
 }
 .icon-option:hover{background:rgba(108,99,255,.2)}
 
+/* ============ Sortable Table Headers ============ */
+th.sortable{cursor:pointer;user-select:none;white-space:nowrap;transition:background .2s}
+th.sortable:hover{background:rgba(108,99,255,.1)}
+.sort-icon{font-size:10px;opacity:.3;margin-left:2px;vertical-align:middle}
+.sort-icon.active{opacity:1;color:var(--primary)}
+
 /* ============ Category Row ============ */
 .cat-row{
   display:flex;align-items:center;gap:10px;
@@ -376,6 +382,16 @@ html.light .theme-toggle .toggle-thumb{left:20px}
 }
 .cat-icon-btn:hover{background:rgba(108,99,255,.15)}
 .cat-name{flex:1;font-size:14px}
+.cat-group{border-bottom:1px solid var(--border);padding-bottom:4px;margin-bottom:4px}
+.cat-group:last-child{border-bottom:none;margin-bottom:0;padding-bottom:0}
+.cat-group .cat-row{border-bottom:none}
+.sub-cat-toggle{cursor:pointer;font-size:16px;color:var(--primary);padding:2px 6px;border-radius:6px;transition:.2s}
+.sub-cat-toggle:hover{background:rgba(108,99,255,.15)}
+.sub-cat-row{display:flex;align-items:center;gap:8px;padding:4px 12px 4px 42px;font-size:13px;color:var(--text2)}
+.sub-cat-dot{font-size:18px;font-weight:bold;color:var(--text3)}
+.sub-cat-add{display:flex;gap:8px;padding:6px 12px 6px 42px;align-items:center}
+.sub-cat-input{padding:6px 10px;background:var(--card);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:12px;flex:1}
+.sub-cat-label{font-size:11px;color:var(--text3);margin-left:2px}
 
 /* ============ 帳單掃描 ============ */
 .bill-upload-area{

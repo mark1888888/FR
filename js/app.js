@@ -91,7 +91,8 @@ function defaultUserData() {
     transfers: [],
     watchStocks: ['2330','2317','2454'],
     categoryIcons: {},
-    updated_at: new Date().toISOString()  // Bug 1: 加入時間戳
+    subCategories: {},   // { '教育': ['學費','午餐費','多元課程費'], '餐飲': ['外食','飲料'] }
+    updated_at: new Date().toISOString()
   };
 }
 
@@ -656,23 +657,79 @@ function drawDashChart(month, cur) {
   dl(eD, '#ef4444');
 }
 
+// ============ 表格排序狀態 ============
+var _sortState = {
+  income: { col: 'date', dir: 'desc' },
+  expense: { col: 'date', dir: 'desc' }
+};
+
+function toggleSort(table, col) {
+  var st = _sortState[table];
+  if (st.col === col) {
+    st.dir = st.dir === 'asc' ? 'desc' : 'asc';
+  } else {
+    st.col = col;
+    st.dir = col === 'date' ? 'desc' : 'asc';
+  }
+  if (table === 'income') renderIncome();
+  else renderExpense();
+}
+
+function _sortIndicator(table, col) {
+  var st = _sortState[table];
+  if (st.col !== col) return ' <span class="sort-icon">⇅</span>';
+  return st.dir === 'asc' ? ' <span class="sort-icon active">▲</span>' : ' <span class="sort-icon active">▼</span>';
+}
+
+function _applySorting(list, table) {
+  var st = _sortState[table];
+  var col = st.col;
+  var dir = st.dir === 'asc' ? 1 : -1;
+  return list.slice().sort(function(a, b) {
+    var va, vb;
+    switch (col) {
+      case 'date': va = a.date || ''; vb = b.date || ''; return va < vb ? -dir : va > vb ? dir : 0;
+      case 'category': va = a.category || ''; vb = b.category || ''; return va.localeCompare(vb) * dir;
+      case 'note': va = a.note || ''; vb = b.note || ''; return va.localeCompare(vb) * dir;
+      case 'payTo': va = a.payTo || ''; vb = b.payTo || ''; return va.localeCompare(vb) * dir;
+      case 'usedBy': va = a.usedBy || ''; vb = b.usedBy || ''; return va.localeCompare(vb) * dir;
+      case 'amount': return (a.amount - b.amount) * dir;
+      case 'currency': va = a.currency || ''; vb = b.currency || ''; return va.localeCompare(vb) * dir;
+      case 'payMethod': va = a.payMethod || ''; vb = b.payMethod || ''; return va.localeCompare(vb) * dir;
+      default: return 0;
+    }
+  });
+}
+
 // ============ 收入 ============
 function renderIncome() {
   var d = U();
   var range = document.getElementById('incRange').value;
   var month = document.getElementById('incMonth').value;
   var year = document.getElementById('incYear').value;
-  var list = filterByRange(d.incomes, range, month, year).sort(function(a, b) { return b.date.localeCompare(a.date); });
+  var list = _applySorting(filterByRange(d.incomes, range, month, year), 'income');
   var total = list.reduce(function(s, i) { return s + convert(i.amount, i.currency, 'TWD'); }, 0);
 
   document.getElementById('incStats').innerHTML =
     '<div class="stat-card"><div class="label">總收入 (TWD)</div><div class="value c-green">' +
     fmt(total, 'TWD') + '</div><div class="sub">' + list.length + ' 筆</div></div>';
 
+  document.getElementById('incThead').innerHTML =
+    '<tr>' +
+    '<th class="sortable" onclick="toggleSort(\'income\',\'date\')">日期' + _sortIndicator('income','date') + '</th>' +
+    '<th class="sortable" onclick="toggleSort(\'income\',\'category\')">類別' + _sortIndicator('income','category') + '</th>' +
+    '<th class="sortable" onclick="toggleSort(\'income\',\'note\')">說明' + _sortIndicator('income','note') + '</th>' +
+    '<th class="sortable" onclick="toggleSort(\'income\',\'payTo\')">支付對象' + _sortIndicator('income','payTo') + '</th>' +
+    '<th class="sortable" onclick="toggleSort(\'income\',\'usedBy\')">使用對象' + _sortIndicator('income','usedBy') + '</th>' +
+    '<th class="sortable" onclick="toggleSort(\'income\',\'amount\')">金額' + _sortIndicator('income','amount') + '</th>' +
+    '<th class="sortable" onclick="toggleSort(\'income\',\'currency\')">幣別' + _sortIndicator('income','currency') + '</th>' +
+    '<th>帳戶</th><th>操作</th></tr>';
+
   document.getElementById('incTable').innerHTML = list.length ? list.map(function(i) {
     var ac = d.accounts.find(function(a) { return a.id === i.accountId; });
+    var mainCat = (i.category || '').split(' > ')[0];
     return '<tr><td>' + i.date + '</td><td><span class="tag tag-green"><span class="cat-icon">' +
-      getIcon(i.category) + '</span>' + i.category + '</span></td><td>' + (i.note || '-') +
+      getIcon(mainCat) + '</span>' + _getCatDisplay(i.category) + '</span></td><td>' + (i.note || '-') +
       '</td><td>' + (i.payTo || '-') + '</td><td>' + (i.usedBy || '-') +
       '</td><td class="c-green" style="font-weight:600">+' + fmt(i.amount, i.currency) +
       '</td><td>' + i.currency + '</td><td>' + (ac ? ac.name : '-') +
@@ -690,7 +747,7 @@ function renderExpense() {
   var pt = document.getElementById('expPayType').value;
   var list = filterByRange(d.expenses, range, month, year);
   if (pt !== 'all') list = list.filter(function(e) { return e.payMethod === pt; });
-  list.sort(function(a, b) { return b.date.localeCompare(a.date); });
+  list = _applySorting(list, 'expense');
 
   var total = list.reduce(function(s, e) { return s + convert(e.amount, e.currency, 'TWD'); }, 0);
   var cc = list.filter(function(e) { return e.payMethod === '信用卡'; })
@@ -703,12 +760,25 @@ function renderExpense() {
     '<div class="stat-card"><div class="label">信用卡</div><div class="value c-orange">' + fmt(cc, 'TWD') + '</div></div>' +
     '<div class="stat-card"><div class="label">現金</div><div class="value c-pink">' + fmt(cash, 'TWD') + '</div></div>';
 
+  document.getElementById('expThead').innerHTML =
+    '<tr>' +
+    '<th class="sortable" onclick="toggleSort(\'expense\',\'date\')">日期' + _sortIndicator('expense','date') + '</th>' +
+    '<th class="sortable" style="min-width:80px" onclick="toggleSort(\'expense\',\'category\')">類別' + _sortIndicator('expense','category') + '</th>' +
+    '<th class="sortable" style="min-width:160px" onclick="toggleSort(\'expense\',\'note\')">說明' + _sortIndicator('expense','note') + '</th>' +
+    '<th class="sortable" onclick="toggleSort(\'expense\',\'payTo\')">支付對象' + _sortIndicator('expense','payTo') + '</th>' +
+    '<th class="sortable" onclick="toggleSort(\'expense\',\'usedBy\')">使用對象' + _sortIndicator('expense','usedBy') + '</th>' +
+    '<th class="sortable" onclick="toggleSort(\'expense\',\'amount\')">金額' + _sortIndicator('expense','amount') + '</th>' +
+    '<th class="sortable" onclick="toggleSort(\'expense\',\'currency\')">幣別' + _sortIndicator('expense','currency') + '</th>' +
+    '<th class="sortable" onclick="toggleSort(\'expense\',\'payMethod\')">支付方式' + _sortIndicator('expense','payMethod') + '</th>' +
+    '<th>帳戶</th><th>操作</th></tr>';
+
   document.getElementById('expTable').innerHTML = list.length ? list.map(function(e) {
     var ac = d.accounts.find(function(a) { return a.id === e.accountId; });
     var tc2 = e.payMethod === '信用卡' ? 'tag-orange' : e.payMethod === '現金' ? 'tag-purple' : 'tag-blue';
     var transferInfo = e.payMethod === '銀行轉帳' && e.transferAccount ? '<br><small style="color:var(--text3)">轉入：' + e.transferAccount + '</small>' : '';
+    var mainCat2 = (e.category || '').split(' > ')[0];
     return '<tr><td>' + e.date + '</td><td><span class="tag tag-red"><span class="cat-icon">' +
-      getIcon(e.category) + '</span>' + e.category + '</span></td><td>' + (e.note || '-') +
+      getIcon(mainCat2) + '</span>' + _getCatDisplay(e.category) + '</span></td><td>' + (e.note || '-') +
       '</td><td>' + (e.payTo || '-') + '</td><td>' + (e.usedBy || '-') +
       '</td><td class="c-red" style="font-weight:600">\u2212' + fmt(e.amount, e.currency) +
       '</td><td>' + e.currency + '</td><td><span class="tag ' + tc2 + '">' + e.payMethod +
@@ -1183,7 +1253,9 @@ function removeStock(code) {
 function groupByCategory(list, cur) {
   var map = {};
   list.forEach(function(item) {
-    map[item.category] = (map[item.category] || 0) + convert(item.amount, item.currency, cur);
+    // 以大分類統計（「教育 > 學費」歸入「教育」）
+    var cat = (item.category || '其他').split(' > ')[0];
+    map[cat] = (map[cat] || 0) + convert(item.amount, item.currency, cur);
   });
   return Object.entries(map).sort(function(a, b) { return b[1] - a[1]; });
 }
@@ -1298,9 +1370,7 @@ function openModal(type, editId) {
 
   if (type === 'income') {
     var editing = editId ? d.incomes.find(function(i) { return i.id === editId; }) : null;
-    var cats = d.incomeCategories.map(function(c) {
-      return '<option value="' + c + '"' + (editing && editing.category === c ? ' selected' : '') + '>' + getIcon(c) + ' ' + c + '</option>';
-    }).join('');
+    var cats = _buildCatOptions(d.incomeCategories, editing ? editing.category : '');
     var acctOpts = d.accounts.map(function(a) {
       return '<option value="' + a.id + '"' + (editing && editing.accountId === a.id ? ' selected' : '') + '>' + a.name + '</option>';
     }).join('');
@@ -1320,9 +1390,7 @@ function openModal(type, editId) {
       '<div class="modal-actions"><button class="btn btn-s" onclick="closeModal()">取消</button><button class="btn btn-p" onclick="saveIncome()">儲存</button></div>';
   } else if (type === 'expense') {
     var editing2 = editId ? d.expenses.find(function(e) { return e.id === editId; }) : null;
-    var cats2 = d.expenseCategories.map(function(c) {
-      return '<option value="' + c + '"' + (editing2 && editing2.category === c ? ' selected' : '') + '>' + getIcon(c) + ' ' + c + '</option>';
-    }).join('');
+    var cats2 = _buildCatOptions(d.expenseCategories, editing2 ? editing2.category : '');
     var payMethods = ['信用卡','現金','銀行轉帳','電子支付'].map(function(pm) {
       return '<option value="' + pm + '"' + (editing2 && editing2.payMethod === pm ? ' selected' : '') + '>' + pm + '</option>';
     }).join('');
@@ -1628,11 +1696,30 @@ function loadCategories() {
 function renderCategoryList(containerId, cats, type) {
   var el = document.getElementById(containerId);
   if (!el) return;
+  var d = U();
+  if (!d.subCategories) d.subCategories = {};
   el.innerHTML = cats.map(function(cat, idx) {
-    return '<div class="cat-row">' +
-      '<span class="cat-icon-btn" onclick="openIconPicker(\'' + cat.replace(/'/g, "\\'") + '\')" title="更改圖示">' + getIcon(cat) + '</span>' +
-      '<span class="cat-name">' + cat + '</span>' +
-      '<span class="del-btn" onclick="removeCategory(\'' + type + '\',' + idx + ')">✕</span>' +
+    var esc = cat.replace(/'/g, "\\'");
+    var subs = d.subCategories[cat] || [];
+    var subHtml = subs.map(function(sub, si) {
+      return '<div class="sub-cat-row">' +
+        '<span class="sub-cat-dot">·</span>' +
+        '<span class="cat-name">' + sub + '</span>' +
+        '<span class="del-btn" onclick="removeSubCategory(\'' + esc + '\',' + si + ')">✕</span>' +
+        '</div>';
+    }).join('');
+    return '<div class="cat-group">' +
+      '<div class="cat-row">' +
+        '<span class="cat-icon-btn" onclick="openIconPicker(\'' + esc + '\')" title="更改圖示">' + getIcon(cat) + '</span>' +
+        '<span class="cat-name">' + cat + '</span>' +
+        '<span class="sub-cat-toggle" onclick="toggleSubCatInput(\'' + esc + '\')" title="新增子類別">＋</span>' +
+        '<span class="del-btn" onclick="removeCategory(\'' + type + '\',' + idx + ')">✕</span>' +
+      '</div>' +
+      subHtml +
+      '<div class="sub-cat-add" id="subCatAdd_' + cat + '" style="display:none">' +
+        '<input type="text" id="subCatInput_' + cat + '" placeholder="子類別名稱" class="sub-cat-input" onkeydown="if(event.key===\'Enter\')addSubCategory(\'' + esc + '\')">' +
+        '<button class="btn btn-p btn-sm" onclick="addSubCategory(\'' + esc + '\')">加入</button>' +
+      '</div>' +
       '</div>';
   }).join('');
 }
@@ -1655,12 +1742,77 @@ function addCategory(type) {
 }
 
 function removeCategory(type, idx) {
-  if (!confirm('確定刪除此類別？')) return;
+  if (!confirm('確定刪除此類別？（含所有子類別）')) return;
   var d = U();
-  if (type === 'income') d.incomeCategories.splice(idx, 1);
-  else d.expenseCategories.splice(idx, 1);
+  var catName;
+  if (type === 'income') { catName = d.incomeCategories[idx]; d.incomeCategories.splice(idx, 1); }
+  else { catName = d.expenseCategories[idx]; d.expenseCategories.splice(idx, 1); }
+  // 同時移除子類別
+  if (d.subCategories && catName) delete d.subCategories[catName];
   save();
   loadCategories();
+}
+
+function toggleSubCatInput(cat) {
+  var el = document.getElementById('subCatAdd_' + cat);
+  if (!el) return;
+  el.style.display = el.style.display === 'none' ? 'flex' : 'none';
+  if (el.style.display !== 'none') {
+    var inp = document.getElementById('subCatInput_' + cat);
+    if (inp) inp.focus();
+  }
+}
+
+function addSubCategory(cat) {
+  var inp = document.getElementById('subCatInput_' + cat);
+  if (!inp) return;
+  var name = inp.value.trim();
+  if (!name) { alert('請輸入子類別名稱'); return; }
+  var d = U();
+  if (!d.subCategories) d.subCategories = {};
+  if (!d.subCategories[cat]) d.subCategories[cat] = [];
+  if (d.subCategories[cat].includes(name)) { alert('子類別已存在'); return; }
+  d.subCategories[cat].push(name);
+  inp.value = '';
+  save();
+  loadCategories();
+}
+
+function removeSubCategory(cat, idx) {
+  if (!confirm('確定刪除此子類別？')) return;
+  var d = U();
+  if (d.subCategories && d.subCategories[cat]) {
+    d.subCategories[cat].splice(idx, 1);
+    if (d.subCategories[cat].length === 0) delete d.subCategories[cat];
+  }
+  save();
+  loadCategories();
+}
+
+/** 取得類別的完整顯示名稱（含子類別）*/
+function _getCatDisplay(category) {
+  if (!category) return '-';
+  var parts = category.split(' > ');
+  if (parts.length > 1) return parts[0] + ' <span class="sub-cat-label">' + parts[1] + '</span>';
+  return category;
+}
+
+/** 產生含子類別的下拉選單 options HTML */
+function _buildCatOptions(cats, selectedVal) {
+  var d = U();
+  if (!d.subCategories) d.subCategories = {};
+  var html = '';
+  cats.forEach(function(c) {
+    var sel = selectedVal === c ? ' selected' : '';
+    html += '<option value="' + c + '"' + sel + '>' + getIcon(c) + ' ' + c + '</option>';
+    var subs = d.subCategories[c] || [];
+    subs.forEach(function(sub) {
+      var val = c + ' > ' + sub;
+      var sel2 = selectedVal === val ? ' selected' : '';
+      html += '<option value="' + val + '"' + sel2 + '>\u00A0\u00A0\u00A0\u00A0' + getIcon(c) + ' ' + sub + '</option>';
+    });
+  });
+  return html;
 }
 
 // ============ Icon Picker ============
@@ -1821,29 +1973,56 @@ function processBillImage(file) {
   reader.readAsDataURL(file);
 }
 
-/** 影像前處理：灰階化 + 對比增強 + 二值化，提升 OCR 辨識率 */
+/** 影像前處理：灰階化 + 對比增強 + 自適應二值化，提升 OCR 辨識率 */
 function _preprocessImage(imageData) {
   return new Promise(function(resolve) {
     var img = new Image();
     img.onload = function() {
       var cv = document.createElement('canvas');
       var ctx = cv.getContext('2d');
-      cv.width = img.width;
-      cv.height = img.height;
-      ctx.drawImage(img, 0, 0);
+      // 如果圖片太大，縮放到合理尺寸以加速處理
+      var scale = 1;
+      if (img.width > 3000) scale = 3000 / img.width;
+      cv.width = Math.round(img.width * scale);
+      cv.height = Math.round(img.height * scale);
+      ctx.drawImage(img, 0, 0, cv.width, cv.height);
 
       var imgData = ctx.getImageData(0, 0, cv.width, cv.height);
       var data = imgData.data;
+      var w = cv.width, h = cv.height;
 
+      // 第一遍：灰階化 + 計算 Otsu 最佳閾值
+      var grayArr = new Uint8Array(w * h);
+      var histogram = new Array(256).fill(0);
       for (var i = 0; i < data.length; i += 4) {
-        // 灰階化（加權平均）
-        var gray = data[i] * 0.299 + data[i+1] * 0.587 + data[i+2] * 0.114;
-        // 對比增強（拉伸至 0-255，factor=1.5）
-        gray = ((gray - 128) * 1.5) + 128;
-        gray = Math.max(0, Math.min(255, gray));
-        // 二值化（Otsu 近似：閾值 140）
-        gray = gray > 140 ? 255 : 0;
-        data[i] = data[i+1] = data[i+2] = gray;
+        var g = Math.round(data[i] * 0.299 + data[i+1] * 0.587 + data[i+2] * 0.114);
+        grayArr[i / 4] = g;
+        histogram[g]++;
+      }
+
+      // Otsu 自適應閾值計算
+      var total = w * h;
+      var sum = 0;
+      for (var t = 0; t < 256; t++) sum += t * histogram[t];
+      var sumB = 0, wB = 0, maxVar = 0, threshold = 128;
+      for (var t2 = 0; t2 < 256; t2++) {
+        wB += histogram[t2];
+        if (wB === 0) continue;
+        var wF = total - wB;
+        if (wF === 0) break;
+        sumB += t2 * histogram[t2];
+        var mB = sumB / wB;
+        var mF = (sum - sumB) / wF;
+        var between = wB * wF * (mB - mF) * (mB - mF);
+        if (between > maxVar) { maxVar = between; threshold = t2; }
+      }
+
+      // 第二遍：對比增強 + 二值化（使用 Otsu 閾值）
+      for (var j = 0; j < grayArr.length; j++) {
+        var gray2 = ((grayArr[j] - 128) * 1.5) + 128;
+        gray2 = Math.max(0, Math.min(255, gray2));
+        var bw = gray2 > threshold ? 255 : 0;
+        data[j * 4] = data[j * 4 + 1] = data[j * 4 + 2] = bw;
       }
       ctx.putImageData(imgData, 0, 0);
       resolve(cv.toDataURL('image/png'));
@@ -1963,7 +2142,12 @@ function _cleanOcrText(text) {
     line = line.replace(/[Oo]([,.]?\d{3})/g, '0$1');          // O,210 → 0,210
     line = line.replace(/(\d{1,3},[0-9])[Oo]([0-9])/g, '$10$2'); // 1,O00 → 1,000
 
-    // 2e. 壓縮多餘空白
+    // 2e. 移除 CJK 與英數之間不必要的空格（停 管 費 AWY → 停管費AWY）
+    //     CJK 接英文字母或數字之間的單一空格
+    line = line.replace(/([\u4e00-\u9fff])\s+([A-Za-z0-9])/g, '$1$2');
+    line = line.replace(/([A-Za-z0-9])\s+([\u4e00-\u9fff])/g, '$1$2');
+
+    // 2f. 壓縮多餘空白
     line = line.replace(/\s+/g, ' ').trim();
 
     lines[i] = line;
@@ -2043,11 +2227,22 @@ function _extractDates(line) {
 /** 從一行中提取所有金額（回傳數值陣列） */
 function _extractAmounts(line) {
   var amounts = [];
-  // 匹配 NT$1,234 / $1234 / 1,234.00 / 1234 等
-  var pat = /(?:NT\$?|＄|\$)?\s*([\d,]+(?:\.\d{1,2})?)/g;
+  // 先清理金額中常見的 OCR 雜訊
+  var cleaned = line
+    .replace(/[oO](?=\d{2,})/g, '0')     // o123 → 0123
+    .replace(/(?<=\d)[oO]/g, '0')         // 12o → 120
+    .replace(/(?<=\d)[lI|]/g, '1')        // 62l → 621
+    .replace(/[lI|](?=\d{2,})/g, '1')     // l23 → 123
+    .replace(/\s*,\s*/g, ',');            // 1 , 234 → 1,234
+
+  // 匹配 NT$1,234 / $1234 / 1,234.00 / 1234 / 元 / 圓 等
+  var pat = /(?:NT\$?|＄|\$|TWD|NTD)?\s*([\d,]+(?:\.\d{1,2})?)(?:\s*(?:元|圓))?/g;
   var m;
-  while ((m = pat.exec(line)) !== null) {
-    var val = parseFloat(m[1].replace(/,/g, ''));
+  while ((m = pat.exec(cleaned)) !== null) {
+    var raw = m[1].replace(/,/g, '');
+    // 過濾掉像日期數字的短字串（日期已在 _extractDates 中處理）
+    if (raw.length <= 2 && !m[0].match(/\$|NT|TWD|NTD|元|圓/)) continue;
+    var val = parseFloat(raw);
     if (val > 0 && val < 10000000) amounts.push(val);
   }
   return amounts;
@@ -2243,9 +2438,7 @@ function renderBillResults() {
         '<div class="bill-item-row">' +
           '<input type="text" value="' + (item.desc || '').replace(/"/g, '&quot;') + '" onchange="_billParsedItems[' + idx + '].desc=this.value" placeholder="說明" style="flex:3;min-width:0">' +
           '<select onchange="_billParsedItems[' + idx + '].category=this.value" style="flex:1.5;min-width:100px">' +
-            d.expenseCategories.map(function(c) {
-              return '<option value="' + c + '"' + (c === item.category ? ' selected' : '') + '>' + getIcon(c) + ' ' + c + '</option>';
-            }).join('') +
+            _buildCatOptions(d.expenseCategories, item.category) +
           '</select>' +
         '</div>' +
         '<div class="bill-item-row">' +
