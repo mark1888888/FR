@@ -841,6 +841,12 @@ function renderAnalysis() {
 
   drawPie('expPieChart', 'expPieLegend', groupByCategory(exp, cur), cur);
   drawPie('incPieChart', 'incPieLegend', groupByCategory(inc, cur), cur);
+
+  // 支付對象 & 使用對象分析（合併收入+支出）
+  var allItems = inc.concat(exp);
+  drawPie('payToPieChart', 'payToPieLegend', groupByField(allItems, 'payTo', cur), cur, true);
+  drawPie('usedByPieChart', 'usedByPieLegend', groupByField(allItems, 'usedBy', cur), cur, true);
+
   drawBarChart('expBarChart', groupByCategory(exp, cur), cur);
   drawMonthlyChart(cur);
 }
@@ -1182,7 +1188,16 @@ function groupByCategory(list, cur) {
   return Object.entries(map).sort(function(a, b) { return b[1] - a[1]; });
 }
 
-function drawPie(cid, lid, data, cur) {
+function groupByField(list, field, cur) {
+  var map = {};
+  list.forEach(function(item) {
+    var key = (item[field] && item[field].trim()) ? item[field].trim() : '其他';
+    map[key] = (map[key] || 0) + convert(item.amount, item.currency, cur);
+  });
+  return Object.entries(map).sort(function(a, b) { return b[1] - a[1]; });
+}
+
+function drawPie(cid, lid, data, cur, noIcon) {
   var cv = document.getElementById(cid);
   var lg = document.getElementById(lid);
   if (!cv || !lg) return;
@@ -1210,9 +1225,10 @@ function drawPie(cid, lid, data, cur) {
   ctx.fillStyle = hc; ctx.fill();
   lg.innerHTML = data.slice(0, 8).map(function(d, i) {
     var amtStr = cur ? fmt(d[1], cur) : '';
+    var iconHtml = noIcon ? '' : '<span class="cat-icon">' + getIcon(d[0]) + '</span>';
     return '<div class="pie-legend-item"><div class="pie-legend-dot" style="background:' +
-      PIE_COLORS[i % PIE_COLORS.length] + '"></div><span><span class="cat-icon">' +
-      getIcon(d[0]) + '</span>' + d[0] + '</span><span style="color:var(--text3);margin-left:auto">' +
+      PIE_COLORS[i % PIE_COLORS.length] + '"></div><span>' + iconHtml + d[0] +
+      '</span><span style="color:var(--text3);margin-left:auto">' +
       (amtStr ? amtStr + ' ' : '') + (d[1] / total * 100).toFixed(1) + '%</span></div>';
   }).join('');
 }
@@ -1855,6 +1871,18 @@ function _parseDateStr(s) {
   var currentYear = new Date().getFullYear();
   var currentMonth = new Date().getMonth() + 1;
   var m;
+  // 民國年格式：YYY/MM/DD（年份 < 200 視為民國年，+1911 轉西元）
+  m = s.match(/^(\d{2,3})[\/\-.](\d{1,2})[\/\-.](\d{1,2})$/);
+  if (m) {
+    var rocY = parseInt(m[1]);
+    if (rocY > 0 && rocY < 200) {
+      var adY = rocY + 1911;
+      var mm0 = parseInt(m[2]), dd0 = parseInt(m[3]);
+      if (mm0 >= 1 && mm0 <= 12 && dd0 >= 1 && dd0 <= 31) {
+        return adY + '-' + m[2].padStart(2,'0') + '-' + m[3].padStart(2,'0');
+      }
+    }
+  }
   // YYYY/MM/DD or YYYY-MM-DD or YYYY.MM.DD
   m = s.match(/(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})/);
   if (m) return m[1] + '-' + m[2].padStart(2,'0') + '-' + m[3].padStart(2,'0');
@@ -1885,6 +1913,7 @@ function _extractDates(line) {
   var results = [];
   var patterns = [
     /\d{4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2}/g,
+    /\d{2,3}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2}/g,  // 民國年 YYY/MM/DD
     /\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{4}/g,
     /\d{1,2}[\/\-\.]\d{1,2}/g,
     /\d{1,2}月\d{1,2}日/g
