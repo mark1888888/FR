@@ -125,11 +125,7 @@ async function cloudSave() {
 async function cloudLoad() {
   if (!currentUserId) return false;
   try {
-    var result = await _sb.from('user_data').select('data').eq('user_id', currentUserId).single();
-    if (result.error && result.error.code === 'PGRST116') {
-      // 無記錄
-      return false;
-    }
+    var result = await _sb.from('user_data').select('data').eq('user_id', currentUserId).maybeSingle();
     if (result.error) throw result.error;
     if (result.data && result.data.data) {
       var cloudData = result.data.data;
@@ -179,9 +175,9 @@ function startSessionCheck() {
   _sessionCheckInterval = setInterval(async function() {
     if (!currentUserId || !_localSessionId) return;
     try {
-      var result = await _sb.from('user_data').select('data').eq('user_id', currentUserId).single();
-      if (result.error) return;
-      if (result.data && result.data.data) {
+      var result = await _sb.from('user_data').select('data').eq('user_id', currentUserId).maybeSingle();
+      if (result.error || !result.data) return;
+      if (result.data.data) {
         var cloudSessionId = result.data.data._activeSessionId || '';
         if (cloudSessionId && cloudSessionId !== _localSessionId) {
           // 另一台裝置已登入，強制登出
@@ -217,9 +213,9 @@ function startPeriodicSync() {
   _syncInterval = setInterval(async function() {
     if (!currentUserId || !DB) return;
     try {
-      var result = await _sb.from('user_data').select('data').eq('user_id', currentUserId).single();
-      if (result.error) return;
-      if (result.data && result.data.data) {
+      var result = await _sb.from('user_data').select('data').eq('user_id', currentUserId).maybeSingle();
+      if (result.error || !result.data) return;
+      if (result.data.data) {
         var cloudData = result.data.data;
         var cloudTime = cloudData.updated_at || '1970-01-01T00:00:00.000Z';
         var localTime = DB.updated_at || '1970-01-01T00:00:00.000Z';
