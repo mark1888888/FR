@@ -371,6 +371,44 @@ html.light .theme-toggle .toggle-thumb{left:20px}
 .cat-icon-btn:hover{background:rgba(108,99,255,.15)}
 .cat-name{flex:1;font-size:14px}
 
+/* ============ 帳單掃描 ============ */
+.bill-upload-area{
+  border:2px dashed var(--border);border-radius:16px;
+  padding:40px 20px;text-align:center;cursor:pointer;
+  transition:border-color .3s,background .3s;
+}
+.bill-upload-area:hover,.bill-upload-area.bill-drag-over{
+  border-color:var(--primary);background:rgba(108,99,255,.05);
+}
+.bill-upload-icon{font-size:48px;margin-bottom:12px}
+.bill-upload-area p{color:var(--text2);font-size:14px;margin-bottom:4px}
+.bill-progress-bar{
+  height:8px;background:var(--bar-bg);border-radius:4px;overflow:hidden;
+}
+.bill-progress-fill{
+  height:100%;background:linear-gradient(135deg,var(--primary),var(--accent));
+  border-radius:4px;transition:width .3s;width:0%;
+}
+.bill-item{
+  display:flex;gap:12px;padding:12px;
+  border:1px solid var(--border);border-radius:12px;
+  margin-bottom:8px;background:var(--card);
+}
+.bill-item-check{display:flex;align-items:flex-start;padding-top:8px}
+.bill-item-check input[type="checkbox"]{
+  width:18px;height:18px;accent-color:var(--primary);cursor:pointer;
+}
+.bill-item-fields{flex:1;display:flex;flex-direction:column;gap:8px}
+.bill-item-row{display:flex;gap:8px}
+.bill-item-row input,.bill-item-row select{
+  padding:8px 10px;background:var(--bg);
+  border:1px solid var(--border);border-radius:8px;
+  color:var(--text);font-size:13px;min-height:36px;
+}
+.bill-item-row input:focus,.bill-item-row select:focus{
+  outline:none;border-color:var(--primary);
+}
+
 /* ============ 同步狀態 ============ */
 .sync-status{
   position:fixed;bottom:16px;right:16px;
@@ -518,6 +556,13 @@ html.light .theme-toggle .toggle-thumb{left:20px}
   /* Icon Picker mobile */
   .icon-grid{grid-template-columns:repeat(6,1fr)}
   .icon-option{width:36px;height:36px;font-size:20px}
+
+  /* Bill Scanner mobile */
+  .bill-upload-area{padding:24px 16px}
+  .bill-upload-icon{font-size:36px}
+  .bill-item{padding:10px;gap:8px}
+  .bill-item-row{flex-wrap:wrap}
+  .bill-item-row input,.bill-item-row select{font-size:12px;min-width:0;flex:1 1 45%}
 }
 
 /* ============ 極小螢幕 (max-width: 400px) ============ */

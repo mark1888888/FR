@@ -22,7 +22,7 @@
     <input type="email" id="loginUser" placeholder="Email" maxlength="60" autocomplete="email">
     <input type="password" id="loginPwd" placeholder="密碼（至少6位）" maxlength="30" autocomplete="current-password">
     <button class="btn-primary" onclick="doLogin()">登入</button>
-    <button class="btn-secondary" onclick="showRegister()">遄沒有帳號？點此註冊</button>
+    <button class="btn-secondary" onclick="showRegister()">還沒有帳號？點此註冊</button>
   </div>
   <div class="login-box" id="registerView" style="display:none">
     <h1>FlowRich</h1>
@@ -39,7 +39,7 @@
 <!-- ==================== 主應用 ==================== -->
 <div class="app" id="app">
 
-  <!-- 桌面偶邊欄 -->
+  <!-- 桌面側邊欄 -->
   <div class="sidebar">
     <div class="logo">FlowRich</div>
     <div class="user-info" id="sidebarUser"></div>
@@ -142,7 +142,7 @@
           </div>
         </div>
         <div class="chart-container">
-          <h3>帳別分佈</h3>
+          <h3>幣別分佈</h3>
           <div class="pie-chart-wrap">
             <canvas id="aasCurPie" width="180" height="180"></canvas>
             <div class="pie-legend" id="aasCurLegend"></div>
@@ -151,7 +151,7 @@
       </div>
       <div class="dual-grid">
         <div class="chart-container">
-          <h3>財債（信用卡）分佈</h3>
+          <h3>負債（信用卡）分佈</h3>
           <div class="pie-chart-wrap">
             <canvas id="aasDebtPie" width="180" height="180"></canvas>
             <div class="pie-legend" id="aasDebtLegend"></div>
@@ -236,7 +236,7 @@
         <div class="table-header"><h3>支出列表</h3></div>
         <div class="table-scroll-wrap">
           <table>
-            <thead><tr><th>日期</th><th>類別</th><th>說明</th><th>支付對象</th><th>使用對象</th><th>金額</th><th>帳別</th><th>支付方式</th><th>帳戶</th><th>操作</th></tr></thead>
+            <thead><tr><th>日期</th><th>類別</th><th>說明</th><th>支付對象</th><th>使用對象</th><th>金額</th><th>幣別</th><th>支付方式</th><th>帳戶</th><th>操作</th></tr></thead>
             <tbody id="expTable"></tbody>
           </table>
         </div>
@@ -396,7 +396,7 @@
       </div>
       <div class="chart-container" style="margin-top:20px">
         <h3>資料管理</h3>
-        <p style="color:var(--text2);font-size:14px;margin-bottom:16px">匯出 JSON 檔案作為備仾</p>
+        <p style="color:var(--text2);font-size:14px;margin-bottom:16px">匯出 JSON 檔案作為備份</p>
         <div class="btn-group">
           <button class="btn btn-p" onclick="exportData()">匯出 JSON</button>
           <button class="btn btn-s" onclick="document.getElementById('importFile').click()">匯入 JSON</button>

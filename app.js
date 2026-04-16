@@ -1575,6 +1575,406 @@ async function resetAll() {
   location.reload();
 }
 
+// ============ 信用卡帳單 OCR 掃描 ============
+var _billParsedItems = [];
+
+function openBillScanner() {
+  var overlay = document.getElementById('billScannerOverlay');
+  resetBillScanner();
+  overlay.classList.add('show');
+}
+
+function closeBillScanner() {
+  document.getElementById('billScannerOverlay').classList.remove('show');
+  _billParsedItems = [];
+}
+
+function resetBillScanner() {
+  _billParsedItems = [];
+  document.getElementById('billUploadArea').style.display = '';
+  document.getElementById('billPreviewArea').style.display = 'none';
+  document.getElementById('billOcrProgress').style.display = 'none';
+  document.getElementById('billResultArea').style.display = 'none';
+  document.getElementById('billInitActions').style.display = '';
+  document.getElementById('billFileInput').value = '';
+}
+
+// 點擊上傳區域
+document.addEventListener('DOMContentLoaded', function() {
+  var uploadArea = document.getElementById('billUploadArea');
+  if (uploadArea) {
+    uploadArea.addEventListener('click', function() {
+      document.getElementById('billFileInput').click();
+    });
+    // 拖曳支援
+    uploadArea.addEventListener('dragover', function(e) {
+      e.preventDefault();
+      uploadArea.classList.add('bill-drag-over');
+    });
+    uploadArea.addEventListener('dragleave', function() {
+      uploadArea.classList.remove('bill-drag-over');
+    });
+    uploadArea.addEventListener('drop', function(e) {
+      e.preventDefault();
+      uploadArea.classList.remove('bill-drag-over');
+      if (e.dataTransfer.files.length > 0) {
+        processBillImage(e.dataTransfer.files[0]);
+      }
+    });
+  }
+});
+
+function handleBillUpload(event) {
+  var file = event.target.files[0];
+  if (file) processBillImage(file);
+}
+
+function processBillImage(file) {
+  if (!file.type.startsWith('image/')) {
+    alert('請上傳圖片檔案（JPG 或 PNG）');
+    return;
+  }
+
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    // 顯示預覽
+    document.getElementById('billUploadArea').style.display = 'none';
+    document.getElementById('billPreviewArea').style.display = 'block';
+    document.getElementById('billPreviewImg').src = e.target.result;
+    document.getElementById('billInitActions').style.display = 'none';
+
+    // 開始 OCR
+    startBillOCR(e.target.result);
+  };
+  reader.readAsDataURL(file);
+}
+
+async function startBillOCR(imageData) {
+  var progressEl = document.getElementById('billOcrProgress');
+  var fillEl = document.getElementById('billProgressFill');
+  var statusEl = document.getElementById('billOcrStatus');
+  progressEl.style.display = 'block';
+
+  try {
+    statusEl.textContent = '正在載入 OCR 引擎...';
+    fillEl.style.width = '10%';
+
+    var result = await Tesseract.recognize(imageData, 'chi_tra+eng', {
+      logger: function(info) {
+        if (info.status === 'recognizing text') {
+          var pct = Math.round(info.progress * 100);
+          fillEl.style.width = (10 + pct * 0.8) + '%';
+          statusEl.textContent = '辨識中... ' + pct + '%';
+        }
+      }
+    });
+
+    fillEl.style.width = '95%';
+    statusEl.textContent = '正在解析帳單內容...';
+
+    var text = result.data.text;
+    console.log('OCR raw text:', text);
+
+    // 解析帳單
+    _billParsedItems = parseBillText(text);
+
+    fillEl.style.width = '100%';
+    statusEl.textContent = '辨識完成！';
+
+    setTimeout(function() {
+      progressEl.style.display = 'none';
+      renderBillResults();
+    }, 500);
+
+  } catch (err) {
+    console.error('OCR error:', err);
+    statusEl.textContent = '辨識失敗：' + err.message;
+    fillEl.style.width = '100%';
+    fillEl.style.background = 'var(--red)';
+  }
+}
+
+/** 解析 OCR 文字，提取交易明細 */
+function parseBillText(text) {
+  var items = [];
+  var lines = text.split('\n').map(function(l) { return l.trim(); }).filter(Boolean);
+
+  // 常見日期格式：MM/DD、YYYY/MM/DD、MM-DD、YYYY-MM-DD、MM月DD日
+  var datePatterns = [
+    /(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})/,   // 2024/01/15
+    /(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})/,     // 01/15/2024
+    /(\d{1,2})[\/\-.](\d{1,2})/,                     // 01/15 or 1/15
+    /(\d{1,2})月(\d{1,2})日/                          // 1月15日
+  ];
+
+  // 金額格式：包含逗號的數字、NT$、$
+  var amountPattern = /(?:NT\$?|＄|\$)?\s*([\d,]+(?:\.\d{1,2})?)/g;
+
+  var currentYear = new Date().getFullYear();
+  var currentMonth = new Date().getMonth() + 1;
+
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+
+    // 跳過表頭、小計、合計行
+    if (/合計|小計|總計|本期|繳款|利息|循環|帳單|TOTAL|BALANCE|PAYMENT|STATEMENT/i.test(line)) continue;
+    if (line.length < 4) continue;
+
+    // 嘗試匹配日期
+    var dateMatch = null;
+    var dateStr = '';
+
+    for (var p = 0; p < datePatterns.length; p++) {
+      var dm = line.match(datePatterns[p]);
+      if (dm) {
+        dateMatch = dm;
+        if (p === 0) {
+          // YYYY/MM/DD
+          dateStr = dm[1] + '-' + dm[2].padStart(2, '0') + '-' + dm[3].padStart(2, '0');
+        } else if (p === 1) {
+          // MM/DD/YYYY
+          dateStr = dm[3] + '-' + dm[1].padStart(2, '0') + '-' + dm[2].padStart(2, '0');
+        } else if (p === 2) {
+          // MM/DD — guess year
+          var mm = parseInt(dm[1]), dd = parseInt(dm[2]);
+          if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) {
+            var yr = (mm > currentMonth) ? currentYear - 1 : currentYear;
+            dateStr = yr + '-' + dm[1].padStart(2, '0') + '-' + dm[2].padStart(2, '0');
+          } else {
+            dateMatch = null;
+          }
+        } else if (p === 3) {
+          // MM月DD日
+          var mm2 = parseInt(dm[1]), dd2 = parseInt(dm[2]);
+          var yr2 = (mm2 > currentMonth) ? currentYear - 1 : currentYear;
+          dateStr = yr2 + '-' + dm[1].padStart(2, '0') + '-' + dm[2].padStart(2, '0');
+        }
+        if (dateMatch) break;
+      }
+    }
+
+    if (!dateMatch) continue;
+
+    // 找金額（取行中最後一個數字作為金額）
+    var amounts = [];
+    var am;
+    amountPattern.lastIndex = 0;
+    while ((am = amountPattern.exec(line)) !== null) {
+      var val = parseFloat(am[1].replace(/,/g, ''));
+      if (val > 0 && val < 10000000) amounts.push(val);
+    }
+    if (amounts.length === 0) continue;
+
+    // 取最後一個數字作為金額（通常帳單格式: 日期 ... 說明 ... 金額）
+    var amount = amounts[amounts.length - 1];
+
+    // 提取說明（去掉日期和金額後的文字）
+    var desc = line;
+    // 移除日期部分
+    desc = desc.replace(dateMatch[0], '');
+    // 移除所有金額
+    amounts.forEach(function(a) {
+      desc = desc.replace(new RegExp('[NT＄$]*\\s*' + a.toLocaleString('en').replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?:\\.\\d{1,2})?'), '');
+      desc = desc.replace(new RegExp('[NT＄$]*\\s*' + a.toString().replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?:\\.\\d{1,2})?'), '');
+    });
+    // 清理多餘符號
+    desc = desc.replace(/[\/\-.\s]+/g, ' ').replace(/^[\s\-\/]+|[\s\-\/]+$/g, '').trim();
+    if (!desc) desc = '帳單消費';
+
+    // 嘗試猜測類別
+    var category = guessBillCategory(desc);
+
+    items.push({
+      date: dateStr,
+      desc: desc,
+      amount: amount,
+      category: category,
+      checked: true
+    });
+  }
+
+  // 如果解析不到任何項目，嘗試用較寬鬆的方式解析
+  if (items.length === 0) {
+    items = parseBillTextLoose(text);
+  }
+
+  return items;
+}
+
+/** 寬鬆解析：逐行找金額 */
+function parseBillTextLoose(text) {
+  var items = [];
+  var lines = text.split('\n').map(function(l) { return l.trim(); }).filter(Boolean);
+  var today = new Date().toISOString().slice(0, 10);
+
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+    if (line.length < 3) continue;
+    if (/合計|小計|總計|本期|繳款|利息|循環|帳單|TOTAL|BALANCE|PAYMENT|STATEMENT/i.test(line)) continue;
+
+    // 找數字
+    var match = line.match(/([\d,]+(?:\.\d{1,2})?)/);
+    if (!match) continue;
+    var val = parseFloat(match[1].replace(/,/g, ''));
+    if (val <= 0 || val > 10000000) continue;
+
+    // 說明
+    var desc = line.replace(match[0], '').replace(/[NT＄$\s\/\-]+/g, ' ').trim();
+    if (!desc || desc.length < 2) desc = '帳單消費';
+
+    var category = guessBillCategory(desc);
+
+    items.push({
+      date: today,
+      desc: desc,
+      amount: val,
+      category: category,
+      checked: true
+    });
+  }
+  return items;
+}
+
+/** 根據消費描述猜測支出類別 */
+function guessBillCategory(desc) {
+  var d = DB || {};
+  var cats = d.expenseCategories || DEFAULT_EXP_CATS;
+  var lower = desc.toLowerCase();
+
+  // 關鍵字對應表
+  var keywords = {
+    '餐飲': ['餐','食','飯','麵','咖啡','tea','coffee','food','restaurant','麥當勞','星巴克','肯德基','吃','飲','小吃','便當','pizza','burger','鍋','壽司','拉麵','早餐','午餐','晚餐','宵夜','外送','uber eats','foodpanda'],
+    '交通': ['加油','停車','高鐵','台鐵','捷運','uber','taxi','計程','公車','油','parking','transport','車','eTag','etag','悠遊'],
+    '購物': ['百貨','商城','mall','amazon','蝦皮','momo','pchome','yahoo','購物','超市','家樂福','costco','全聯','7-11','便利','超商','大潤發','好市多'],
+    '娛樂': ['電影','cinema','netflix','spotify','遊戲','game','ktv','書','book','電玩','串流','disney','youtube','premium'],
+    '醫療': ['醫院','診所','藥','hospital','clinic','pharmacy','牙','眼','health','醫','掛號'],
+    '教育': ['學費','補習','書店','課程','udemy','coursera','教育','學','tuition'],
+    '居住': ['房租','管理費','水費','電費','瓦斯','房屋','rent','utility','水電'],
+    '日用品': ['日用','清潔','衛生','洗','soap','生活','用品'],
+    '通訊': ['電信','手機','internet','網路','中華電信','遠傳','台灣大','line','通訊費'],
+    '保險': ['保險','insurance','壽險','意外','醫療險'],
+    '服飾': ['服飾','衣','鞋','帽','uniqlo','zara','h&m','clothes','fashion'],
+    '美容': ['美容','美髮','salon','spa','理髮','美甲']
+  };
+
+  for (var cat in keywords) {
+    if (cats.includes(cat)) {
+      for (var k = 0; k < keywords[cat].length; k++) {
+        if (lower.includes(keywords[cat][k])) return cat;
+      }
+    }
+  }
+  return cats.includes('其他支出') ? '其他支出' : cats[0] || '其他支出';
+}
+
+/** 渲染辨識結果列表 */
+function renderBillResults() {
+  var resultArea = document.getElementById('billResultArea');
+  var listEl = document.getElementById('billResultList');
+  var countEl = document.getElementById('billResultCount');
+
+  if (_billParsedItems.length === 0) {
+    resultArea.style.display = 'block';
+    listEl.innerHTML = '<p style="text-align:center;color:var(--text3);padding:20px">未能辨識出消費明細。<br>請確保圖片清晰，或嘗試重新拍照。</p>';
+    countEl.textContent = '';
+    return;
+  }
+
+  countEl.textContent = '共 ' + _billParsedItems.length + ' 筆';
+  var d = U();
+  var catOpts = d.expenseCategories.map(function(c) {
+    return '<option value="' + c + '">' + getIcon(c) + ' ' + c + '</option>';
+  }).join('');
+  var acctOpts = d.accounts.map(function(a) {
+    return '<option value="' + a.id + '">' + a.name + '</option>';
+  }).join('');
+
+  // 找預設信用卡帳戶
+  var defaultCreditAcct = d.accounts.find(function(a) { return a.type === 'credit'; });
+  var defaultAcctId = defaultCreditAcct ? defaultCreditAcct.id : (d.accounts[0] ? d.accounts[0].id : '');
+
+  listEl.innerHTML = _billParsedItems.map(function(item, idx) {
+    return '<div class="bill-item" id="billItem' + idx + '">' +
+      '<div class="bill-item-check">' +
+        '<input type="checkbox" id="billCheck' + idx + '"' + (item.checked ? ' checked' : '') + ' onchange="_billParsedItems[' + idx + '].checked=this.checked">' +
+      '</div>' +
+      '<div class="bill-item-fields">' +
+        '<div class="bill-item-row">' +
+          '<input type="date" value="' + item.date + '" onchange="_billParsedItems[' + idx + '].date=this.value" style="flex:1">' +
+          '<input type="number" value="' + item.amount + '" step="0.01" onchange="_billParsedItems[' + idx + '].amount=parseFloat(this.value)||0" style="flex:1">' +
+        '</div>' +
+        '<div class="bill-item-row">' +
+          '<input type="text" value="' + (item.desc || '').replace(/"/g, '&quot;') + '" onchange="_billParsedItems[' + idx + '].desc=this.value" placeholder="說明" style="flex:2">' +
+          '<select onchange="_billParsedItems[' + idx + '].category=this.value" style="flex:1">' +
+            d.expenseCategories.map(function(c) {
+              return '<option value="' + c + '"' + (c === item.category ? ' selected' : '') + '>' + getIcon(c) + ' ' + c + '</option>';
+            }).join('') +
+          '</select>' +
+        '</div>' +
+        '<div class="bill-item-row">' +
+          '<select onchange="_billParsedItems[' + idx + '].accountId=this.value" style="flex:1">' +
+            d.accounts.map(function(a) {
+              return '<option value="' + a.id + '"' + (a.id === defaultAcctId ? ' selected' : '') + '>' + a.name + '</option>';
+            }).join('') +
+          '</select>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+
+  // 設定預設帳戶 ID
+  _billParsedItems.forEach(function(item) {
+    if (!item.accountId) item.accountId = defaultAcctId;
+  });
+
+  resultArea.style.display = 'block';
+}
+
+/** 批次建檔所有勾選的帳單項目 */
+function saveBillExpenses() {
+  var d = U();
+  var checkedItems = _billParsedItems.filter(function(item) { return item.checked; });
+
+  if (checkedItems.length === 0) {
+    alert('請至少勾選一筆消費記錄');
+    return;
+  }
+
+  var count = 0;
+  checkedItems.forEach(function(item) {
+    if (!item.amount || item.amount <= 0) return;
+    var acctId = item.accountId || (d.accounts[0] ? d.accounts[0].id : '');
+    var newExpense = {
+      id: genId(),
+      date: item.date,
+      category: item.category,
+      payMethod: '信用卡',
+      accountId: acctId,
+      amount: item.amount,
+      currency: 'TWD',
+      note: item.desc || '帳單掃描',
+      payTo: '',
+      usedBy: ''
+    };
+    d.expenses.push(newExpense);
+
+    // 扣除帳戶餘額
+    var ac = d.accounts.find(function(a) { return a.id === acctId; });
+    if (ac) ac.balance -= convert(item.amount, 'TWD', ac.currency);
+
+    count++;
+  });
+
+  if (count > 0) {
+    save();
+    closeBillScanner();
+    renderExpense();
+    alert('成功建檔 ' + count + ' 筆支出記錄！');
+  } else {
+    alert('沒有有效的消費記錄可建檔');
+  }
+}
+
 // ============ 事件綁定 ============
 document.getElementById('loginPwd').addEventListener('keydown', function(e) {
   if (e.key === 'Enter') doLogin();
