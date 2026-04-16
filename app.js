@@ -21,7 +21,7 @@ let DB=null, currentUser='', currentUserId='';
 // ============ SUPABASE ============
 const SUPABASE_URL = 'https://zdghqxxydlibgqvooesn.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_uyC2tpnAclYTKq2OQDBOkA_uBIq1X6N';
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+var _sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 function showSync(msg,type){const el=document.getElementById('syncStatus');el.textContent=msg;el.className='sync-status sync-'+type;if(type==='ok')setTimeout(()=>{el.classList.add('sync-hide');},2000);}
 
@@ -42,7 +42,7 @@ async function cloudSave(){
   if(!currentUserId)return;
   showSync('儲存中...','saving');
   try{
-    const {error}=await supabase.from('user_data').upsert({user_id:currentUserId,data:DB},{onConflict:'user_id'});
+    const {error}=await _sb.from('user_data').upsert({user_id:currentUserId,data:DB},{onConflict:'user_id'});
     if(error)throw error;
     showSync('已同步至雲端 ✓','ok');
   }catch(e){
@@ -53,7 +53,7 @@ async function cloudSave(){
 async function cloudLoad(){
   if(!currentUserId)return false;
   try{
-    const {data,error}=await supabase.from('user_data').select('data').eq('user_id',currentUserId).single();
+    const {data,error}=await _sb.from('user_data').select('data').eq('user_id',currentUserId).single();
     if(error&&error.code==='PGRST116'){return false;} // no row
     if(error)throw error;
     if(data&&data.data){DB=data.data;saveLocal();return true;}
@@ -79,7 +79,7 @@ async function doLogin(){
   if(!email||!pwd){showLoginError('請輸入 Email 和密碼');return;}
   showLoginError('登入中...');document.getElementById('loginError').style.display='block';document.getElementById('loginError').style.color='var(--text3)';
   try{
-    const {data,error}=await supabase.auth.signInWithPassword({email,password:pwd});
+    const {data,error}=await _sb.auth.signInWithPassword({email,password:pwd});
     if(error)throw error;
     currentUserId=data.user.id;currentUser=data.user.email;
     const loaded=await cloudLoad();
@@ -98,7 +98,7 @@ async function doSetup(){
   if(p1!==p2){showRegisterError('兩次密碼不一致');return;}
   showRegisterError('註冊中...');document.getElementById('registerError').style.display='block';document.getElementById('registerError').style.color='var(--text3)';
   try{
-    const {data,error}=await supabase.auth.signUp({email,password:p1});
+    const {data,error}=await _sb.auth.signUp({email,password:p1});
     if(error)throw error;
     if(data.user&&!data.session){showRegisterError('請查收 Email 確認信後再登入');document.getElementById('registerError').style.color='var(--green)';return;}
     currentUserId=data.user.id;currentUser=data.user.email;
@@ -121,7 +121,7 @@ function initNewUser(){
 function enterApp(){document.getElementById('loginOverlay').style.display='none';document.getElementById('app').style.display='flex';document.getElementById('sidebarUser').textContent=currentUser;const se=document.getElementById('settingsEmail');if(se)se.textContent=currentUser;initMonthSelectors();fetchRates();renderDashboard();loadCategories();}
 
 async function doLogout(){
-  await supabase.auth.signOut();
+  await _sb.auth.signOut();
   currentUser='';currentUserId='';DB=null;
   document.getElementById('app').style.display='none';
   document.getElementById('loginOverlay').style.display='flex';
@@ -420,7 +420,7 @@ async function changePwd(){
   const np=document.getElementById('newPwd2').value;
   if(!np||np.length<6){alert('新密碼至少 6 位');return;}
   try{
-    const {error}=await supabase.auth.updateUser({password:np});
+    const {error}=await _sb.auth.updateUser({password:np});
     if(error)throw error;
     alert('密碼已更新');document.getElementById('newPwd2').value='';
   }catch(e){alert('更新失敗: '+e.message);}
@@ -438,7 +438,7 @@ document.getElementById('confirmPwd').addEventListener('keydown',e=>{if(e.key===
 
 // Auto-restore session on page load
 (async function(){
-  const {data:{session}}=await supabase.auth.getSession();
+  const {data:{session}}=await _sb.auth.getSession();
   if(session&&session.user){
     currentUserId=session.user.id;currentUser=session.user.email;
     const loaded=await cloudLoad();
