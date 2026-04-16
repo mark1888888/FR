@@ -88,6 +88,7 @@ function defaultUserData() {
     accounts: [],
     incomes: [],
     expenses: [],
+    transfers: [],
     watchStocks: ['2330','2317','2454'],
     categoryIcons: {},
     updated_at: new Date().toISOString()  // Bug 1: 加入時間戳
@@ -284,6 +285,7 @@ document.addEventListener('visibilitychange', function() {
 function U() {
   if (!DB.watchStocks) DB.watchStocks = ['2330','2317','2454'];
   if (!DB.categoryIcons) DB.categoryIcons = {};
+  if (!DB.transfers) DB.transfers = [];
   if (!DB.updated_at) DB.updated_at = new Date().toISOString();
   return DB;
 }
@@ -459,7 +461,7 @@ function initMonthSelectors() {
     var mm = y2.getFullYear() + '-' + ((y2.getMonth() + 1) < 10 ? '0' : '') + (y2.getMonth() + 1);
     months.push(mm);
   }
-  ['dashMonth','incMonth','expMonth','anaMonth'].forEach(function(id) {
+  ['dashMonth','incMonth','expMonth','anaMonth','tfMonth'].forEach(function(id) {
     var sel = document.getElementById(id);
     if (!sel) return;
     sel.innerHTML = '<option value="all">全部月份</option>' +
@@ -469,7 +471,7 @@ function initMonthSelectors() {
   });
   var years = [];
   for (var j = 0; j < 5; j++) years.push((curY - j).toString());
-  ['incYear','expYear','anaYear'].forEach(function(id) {
+  ['incYear','expYear','anaYear','tfYear'].forEach(function(id) {
     var sel = document.getElementById(id);
     if (!sel) return;
     sel.innerHTML = years.map(function(y) {
@@ -553,6 +555,7 @@ function switchPage(page) {
     income: renderIncome,
     expense: renderExpense,
     assets: renderAssets,
+    transfer: renderTransfer,
     analysis: renderAnalysis,
     invest: renderInvest
   };
@@ -1326,6 +1329,27 @@ function openModal(type, editId) {
       '<input type="hidden" id="f_editId" value="' + (editId || '') + '">' +
       '<div class="modal-actions"><button class="btn btn-s" onclick="closeModal()">取消</button><button class="btn btn-p" onclick="saveAccount()">儲存</button></div>';
     if (!editing3) document.getElementById('f_type').value = currentAssetTab;
+  } else if (type === 'transfer') {
+    var editing4 = editId ? (d.transfers || []).find(function(t) { return t.id === editId; }) : null;
+    var allAccts = d.accounts;
+    var fromOpts = allAccts.map(function(a) {
+      return '<option value="' + a.id + '"' + (editing4 && editing4.fromAccountId === a.id ? ' selected' : '') + '>' + a.name + ' (' + ACCOUNT_TYPES[a.type] + ')</option>';
+    }).join('');
+    var toOpts = allAccts.map(function(a) {
+      return '<option value="' + a.id + '"' + (editing4 && editing4.toAccountId === a.id ? ' selected' : '') + '>' + a.name + ' (' + ACCOUNT_TYPES[a.type] + ')</option>';
+    }).join('');
+    var curOpts4 = Object.entries(CURRENCIES).map(function(entry) {
+      return '<option value="' + entry[0] + '"' + (editing4 && editing4.currency === entry[0] ? ' selected' : '') + '>' + entry[0] + ' ' + entry[1] + '</option>';
+    }).join('');
+    m.innerHTML = '<h3>' + (editing4 ? '編輯' : '新增') + '帳戶轉帳</h3>' +
+      '<div class="form-group"><label>日期</label><input type="date" id="f_date" value="' + (editing4 ? editing4.date : new Date().toISOString().slice(0, 10)) + '"></div>' +
+      '<div class="form-row"><div class="form-group"><label>轉出帳戶</label><select id="f_fromAcct">' + fromOpts + '</select></div>' +
+      '<div class="form-group"><label>轉入帳戶</label><select id="f_toAcct">' + toOpts + '</select></div></div>' +
+      '<div class="form-row"><div class="form-group"><label>金額</label><input type="number" id="f_amt" step="0.01" value="' + (editing4 ? editing4.amount : '') + '"></div>' +
+      '<div class="form-group"><label>幣別</label><select id="f_cur">' + curOpts4 + '</select></div></div>' +
+      '<div class="form-group"><label>備註</label><input type="text" id="f_note" placeholder="例：繳信用卡帳單" value="' + (editing4 ? editing4.note || '' : '') + '"></div>' +
+      '<input type="hidden" id="f_editId" value="' + (editId || '') + '">' +
+      '<div class="modal-actions"><button class="btn btn-s" onclick="closeModal()">取消</button><button class="btn btn-p" onclick="saveTransfer()">儲存</button></div>';
   }
   document.getElementById('modalOverlay').classList.add('show');
 }
@@ -1444,6 +1468,107 @@ function deleteRecord(col, id) {
   save();
   if (col === 'incomes') renderIncome();
   else renderExpense();
+}
+
+// ============ 帳戶轉帳 ============
+function saveTransfer() {
+  var amt = parseFloat(document.getElementById('f_amt').value);
+  if (!amt || amt <= 0) { showToast('請輸入有效金額', 'warn'); return; }
+  var fromId = document.getElementById('f_fromAcct').value;
+  var toId = document.getElementById('f_toAcct').value;
+  if (fromId === toId) { showToast('轉出與轉入帳戶不能相同', 'warn'); return; }
+  var d = U();
+  if (!d.transfers) d.transfers = [];
+  var editId = document.getElementById('f_editId').value;
+  var newData = {
+    date: document.getElementById('f_date').value,
+    fromAccountId: fromId,
+    toAccountId: toId,
+    amount: amt,
+    currency: document.getElementById('f_cur').value,
+    note: document.getElementById('f_note').value
+  };
+  if (editId) {
+    // 編輯：先復原舊轉帳的帳戶餘額
+    var old = d.transfers.find(function(t) { return t.id === editId; });
+    if (old) {
+      var oldFrom = d.accounts.find(function(a) { return a.id === old.fromAccountId; });
+      var oldTo = d.accounts.find(function(a) { return a.id === old.toAccountId; });
+      if (oldFrom) oldFrom.balance += convert(old.amount, old.currency, oldFrom.currency);
+      if (oldTo) oldTo.balance -= convert(old.amount, old.currency, oldTo.currency);
+      Object.assign(old, newData);
+    }
+  } else {
+    d.transfers.push(Object.assign({ id: genId() }, newData));
+  }
+  // 更新帳戶餘額
+  var fromAcct = d.accounts.find(function(a) { return a.id === newData.fromAccountId; });
+  var toAcct = d.accounts.find(function(a) { return a.id === newData.toAccountId; });
+  if (fromAcct) fromAcct.balance -= convert(amt, newData.currency, fromAcct.currency);
+  if (toAcct) toAcct.balance += convert(amt, newData.currency, toAcct.currency);
+  save(); closeModal(); renderTransfer();
+  showToast('✅ 轉帳記錄已儲存', 'success');
+}
+
+function deleteTransfer(id) {
+  if (!confirm('確定刪除此轉帳記錄？')) return;
+  var d = U();
+  if (!d.transfers) return;
+  var tf = d.transfers.find(function(t) { return t.id === id; });
+  if (tf) {
+    // 復原帳戶餘額
+    var fromAcct = d.accounts.find(function(a) { return a.id === tf.fromAccountId; });
+    var toAcct = d.accounts.find(function(a) { return a.id === tf.toAccountId; });
+    if (fromAcct) fromAcct.balance += convert(tf.amount, tf.currency, fromAcct.currency);
+    if (toAcct) toAcct.balance -= convert(tf.amount, tf.currency, toAcct.currency);
+  }
+  d.transfers = d.transfers.filter(function(t) { return t.id !== id; });
+  save(); renderTransfer();
+}
+
+function renderTransfer() {
+  var d = U();
+  if (!d.transfers) d.transfers = [];
+  var range = document.getElementById('tfRange').value;
+  var month = document.getElementById('tfMonth').value;
+  var year = document.getElementById('tfYear').value;
+  var list = filterByRange(d.transfers, range, month, year);
+  list.sort(function(a, b) { return b.date.localeCompare(a.date); });
+
+  var cur = 'TWD';
+  var total = 0;
+  list.forEach(function(t) { total += convert(t.amount, t.currency, cur); });
+
+  document.getElementById('tfStats').innerHTML =
+    '<div class="stat-card"><div class="label">轉帳筆數</div><div class="value">' + list.length + '</div></div>' +
+    '<div class="stat-card"><div class="label">轉帳總額</div><div class="value c-blue">' + fmt(total, cur) + '</div></div>';
+
+  var tbody = document.getElementById('tfTable');
+  if (list.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text3);padding:32px">尚無轉帳記錄</td></tr>';
+    return;
+  }
+  tbody.innerHTML = list.map(function(t) {
+    var fromAcct = d.accounts.find(function(a) { return a.id === t.fromAccountId; });
+    var toAcct = d.accounts.find(function(a) { return a.id === t.toAccountId; });
+    return '<tr>' +
+      '<td>' + t.date + '</td>' +
+      '<td>' + (fromAcct ? fromAcct.name : '(已刪除)') + '</td>' +
+      '<td>' + (toAcct ? toAcct.name : '(已刪除)') + '</td>' +
+      '<td class="amt">' + fmt(t.amount, t.currency) + '</td>' +
+      '<td>' + t.currency + '</td>' +
+      '<td>' + (t.note || '-') + '</td>' +
+      '<td>' +
+        '<span class="edit-btn" onclick="openModal(\'transfer\',\'' + t.id + '\')">✏️</span>' +
+        '<span class="del-btn" onclick="deleteTransfer(\'' + t.id + '\')">✕</span>' +
+      '</td></tr>';
+  }).join('');
+}
+
+function updateTfSel() {
+  var range = document.getElementById('tfRange').value;
+  document.getElementById('tfMonth').style.display = range === 'month' ? '' : 'none';
+  document.getElementById('tfYear').style.display = range === 'year' ? '' : 'none';
 }
 
 // ============ 設定 ============
@@ -1631,7 +1756,7 @@ function handleBillUpload(event) {
 
 function processBillImage(file) {
   if (!file.type.startsWith('image/')) {
-    alert('請上傳圖片檔案（JPG 或 PNG）');
+    showToast('請上傳圖片檔案（JPG 或 PNG）', 'warn');
     return;
   }
 
@@ -1950,8 +2075,8 @@ function renderBillResults() {
           '<input type="number" value="' + item.amount + '" step="0.01" onchange="_billParsedItems[' + idx + '].amount=parseFloat(this.value)||0" style="flex:1">' +
         '</div>' +
         '<div class="bill-item-row">' +
-          '<input type="text" value="' + (item.desc || '').replace(/"/g, '&quot;') + '" onchange="_billParsedItems[' + idx + '].desc=this.value" placeholder="說明" style="flex:2">' +
-          '<select onchange="_billParsedItems[' + idx + '].category=this.value" style="flex:1">' +
+          '<input type="text" value="' + (item.desc || '').replace(/"/g, '&quot;') + '" onchange="_billParsedItems[' + idx + '].desc=this.value" placeholder="說明" style="flex:3;min-width:0">' +
+          '<select onchange="_billParsedItems[' + idx + '].category=this.value" style="flex:1.5;min-width:100px">' +
             d.expenseCategories.map(function(c) {
               return '<option value="' + c + '"' + (c === item.category ? ' selected' : '') + '>' + getIcon(c) + ' ' + c + '</option>';
             }).join('') +
@@ -1982,7 +2107,7 @@ function saveBillExpenses() {
   var checkedItems = _billParsedItems.filter(function(item) { return item.checked; });
 
   if (checkedItems.length === 0) {
-    alert('請至少勾選一筆消費記錄');
+    showToast('請至少勾選一筆消費記錄', 'warn');
     return;
   }
 
@@ -2015,10 +2140,36 @@ function saveBillExpenses() {
     save();
     closeBillScanner();
     renderExpense();
-    alert('成功建檔 ' + count + ' 筆支出記錄！');
+    showToast('✅ 成功建檔 ' + count + ' 筆支出記錄！', 'success');
   } else {
-    alert('沒有有效的消費記錄可建檔');
+    showToast('沒有有效的消費記錄可建檔', 'warn');
   }
+}
+
+/** 顯示 Toast 提示（取代 alert） */
+function showToast(msg, type) {
+  type = type || 'info';
+  var el = document.getElementById('toastNotify');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'toastNotify';
+    document.body.appendChild(el);
+  }
+  var colors = {
+    success: 'background:rgba(34,197,94,.15);color:var(--green);border:1px solid rgba(34,197,94,.3)',
+    warn: 'background:rgba(245,158,11,.15);color:var(--orange);border:1px solid rgba(245,158,11,.3)',
+    error: 'background:rgba(239,68,68,.15);color:var(--red);border:1px solid rgba(239,68,68,.3)',
+    info: 'background:rgba(108,99,255,.15);color:var(--primary-light);border:1px solid rgba(108,99,255,.3)'
+  };
+  el.style.cssText = 'position:fixed;top:24px;left:50%;transform:translateX(-50%);z-index:9999;padding:14px 28px;border-radius:12px;font-size:15px;font-weight:500;pointer-events:none;opacity:0;transition:opacity .3s;white-space:nowrap;' + (colors[type] || colors.info);
+  el.textContent = msg;
+  // 淡入
+  requestAnimationFrame(function() { el.style.opacity = '1'; });
+  // 自動消失
+  clearTimeout(window._toastTimer);
+  window._toastTimer = setTimeout(function() {
+    el.style.opacity = '0';
+  }, 2500);
 }
 
 // ============ 事件綁定 ============

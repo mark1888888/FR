@@ -64,6 +64,10 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12V7H5a2 2 0 010-4h14v4"/><path d="M3 5v14a2 2 0 002 2h16v-5"/><path d="M18 12a2 2 0 000 4h4v-4h-4z"/></svg>
       <span>資產</span>
     </div>
+    <div class="nav-item" data-page="transfer" onclick="switchPage('transfer')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 16l-4-4 4-4"/><path d="M3 12h18"/><path d="M17 8l4 4-4 4"/></svg>
+      <span>轉帳</span>
+    </div>
     <div class="nav-item" data-page="analysis" onclick="switchPage('analysis')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
       <span>收支分析</span>
@@ -241,7 +245,7 @@
         <div class="table-header"><h3>支出列表</h3></div>
         <div class="table-scroll-wrap">
           <table>
-            <thead><tr><th>日期</th><th>類別</th><th>說明</th><th>支付對象</th><th>使用對象</th><th>金額</th><th>幣別</th><th>支付方式</th><th>帳戶</th><th>操作</th></tr></thead>
+            <thead><tr><th>日期</th><th style="min-width:80px">類別</th><th style="min-width:160px">說明</th><th>支付對象</th><th>使用對象</th><th>金額</th><th>幣別</th><th>支付方式</th><th>帳戶</th><th>操作</th></tr></thead>
             <tbody id="expTable"></tbody>
           </table>
         </div>
@@ -269,6 +273,29 @@
           <table>
             <thead id="assetThead"><tr><th>帳戶名稱</th><th>機構</th><th>幣別</th><th>餘額</th><th>說明</th><th></th></tr></thead>
             <tbody id="assetTable"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== 帳戶轉帳 ==================== -->
+    <div class="page" id="page-transfer">
+      <div class="page-title">帳戶轉帳</div>
+      <div class="filter-bar">
+        <select id="tfRange" onchange="updateTfSel();renderTransfer()">
+          <option value="month">月份</option><option value="year">年度</option><option value="all">全部</option>
+        </select>
+        <select id="tfMonth" onchange="renderTransfer()"></select>
+        <select id="tfYear" onchange="renderTransfer()" style="display:none"></select>
+        <button class="btn btn-p" onclick="openModal('transfer')">+ 新增轉帳</button>
+      </div>
+      <div class="stat-grid" id="tfStats"></div>
+      <div class="table-wrap">
+        <div class="table-header"><h3>轉帳記錄</h3></div>
+        <div class="table-scroll-wrap">
+          <table>
+            <thead><tr><th>日期</th><th>轉出帳戶</th><th>轉入帳戶</th><th>金額</th><th>幣別</th><th style="min-width:120px">備註</th><th>操作</th></tr></thead>
+            <tbody id="tfTable"></tbody>
           </table>
         </div>
       </div>

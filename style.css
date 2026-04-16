@@ -409,8 +409,10 @@ html.light .theme-toggle .toggle-thumb{left:20px}
 .bill-item-row input,.bill-item-row select{
   padding:8px 10px;background:var(--bg);
   border:1px solid var(--border);border-radius:8px;
-  color:var(--text);font-size:13px;min-height:36px;
+  color:var(--text);font-size:13px;min-height:36px;min-width:0;
 }
+.bill-item-row input[type="text"]{flex:3}
+.bill-item-row select{flex:1.5}
 .bill-item-row input:focus,.bill-item-row select:focus{
   outline:none;border-color:var(--primary);
 }
