@@ -37,6 +37,10 @@ button{cursor:pointer;border:none;background:none;color:inherit}
   background:var(--surface);border:1px solid var(--border);
   border-radius:20px;padding:48px;width:400px;max-width:95vw;text-align:center;
 }
+.login-logo{
+  width:80px;height:80px;border-radius:50%;margin-bottom:16px;
+  box-shadow:0 4px 20px rgba(108,99,255,.3);
+}
 .login-box h1{
   font-size:28px;margin-bottom:8px;
   background:linear-gradient(135deg,var(--primary),var(--accent));
@@ -78,7 +82,9 @@ button{cursor:pointer;border:none;background:none;color:inherit}
   padding:0 24px;font-size:22px;font-weight:700;margin-bottom:32px;
   background:linear-gradient(135deg,var(--primary),var(--accent));
   -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  display:flex;align-items:center;gap:8px;
 }
+.logo-icon{width:28px;height:28px;border-radius:50%}
 .nav-item{
   display:flex;align-items:center;gap:12px;
   padding:12px 24px;color:var(--text2);font-size:14px;

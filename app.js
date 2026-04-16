@@ -1694,94 +1694,130 @@ async function startBillOCR(imageData) {
   }
 }
 
-/** 解析 OCR 文字，提取交易明細 */
-function parseBillText(text) {
-  var items = [];
-  var lines = text.split('\n').map(function(l) { return l.trim(); }).filter(Boolean);
-
-  // 常見日期格式：MM/DD、YYYY/MM/DD、MM-DD、YYYY-MM-DD、MM月DD日
-  var datePatterns = [
-    /(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})/,   // 2024/01/15
-    /(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})/,     // 01/15/2024
-    /(\d{1,2})[\/\-.](\d{1,2})/,                     // 01/15 or 1/15
-    /(\d{1,2})月(\d{1,2})日/                          // 1月15日
-  ];
-
-  // 金額格式：包含逗號的數字、NT$、$
-  var amountPattern = /(?:NT\$?|＄|\$)?\s*([\d,]+(?:\.\d{1,2})?)/g;
-
+/** 解析日期字串，回傳 YYYY-MM-DD 或 null */
+function _parseDateStr(s) {
   var currentYear = new Date().getFullYear();
   var currentMonth = new Date().getMonth() + 1;
+  var m;
+  // YYYY/MM/DD or YYYY-MM-DD or YYYY.MM.DD
+  m = s.match(/(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})/);
+  if (m) return m[1] + '-' + m[2].padStart(2,'0') + '-' + m[3].padStart(2,'0');
+  // MM/DD/YYYY
+  m = s.match(/(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})/);
+  if (m) return m[3] + '-' + m[1].padStart(2,'0') + '-' + m[2].padStart(2,'0');
+  // MM/DD or M/D (no year)
+  m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})$/);
+  if (m) {
+    var mm = parseInt(m[1]), dd = parseInt(m[2]);
+    if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) {
+      var yr = (mm > currentMonth) ? currentYear - 1 : currentYear;
+      return yr + '-' + m[1].padStart(2,'0') + '-' + m[2].padStart(2,'0');
+    }
+  }
+  // MM月DD日
+  m = s.match(/(\d{1,2})月(\d{1,2})日/);
+  if (m) {
+    var mm2 = parseInt(m[1]);
+    var yr2 = (mm2 > currentMonth) ? currentYear - 1 : currentYear;
+    return yr2 + '-' + m[1].padStart(2,'0') + '-' + m[2].padStart(2,'0');
+  }
+  return null;
+}
+
+/** 從一行中提取所有日期 token（支援空白或斜線分隔的多種格式） */
+function _extractDates(line) {
+  var results = [];
+  var patterns = [
+    /\d{4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2}/g,
+    /\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{4}/g,
+    /\d{1,2}[\/\-\.]\d{1,2}/g,
+    /\d{1,2}月\d{1,2}日/g
+  ];
+  for (var p = 0; p < patterns.length; p++) {
+    var m;
+    while ((m = patterns[p].exec(line)) !== null) {
+      var parsed = _parseDateStr(m[0]);
+      if (parsed) results.push({ raw: m[0], date: parsed, index: m.index });
+    }
+  }
+  // 依位置排序、去重
+  results.sort(function(a,b) { return a.index - b.index; });
+  var seen = {};
+  return results.filter(function(r) {
+    if (seen[r.index]) return false;
+    seen[r.index] = true;
+    return true;
+  });
+}
+
+/** 從一行中提取所有金額（回傳數值陣列） */
+function _extractAmounts(line) {
+  var amounts = [];
+  // 匹配 NT$1,234 / $1234 / 1,234.00 / 1234 等
+  var pat = /(?:NT\$?|＄|\$)?\s*([\d,]+(?:\.\d{1,2})?)/g;
+  var m;
+  while ((m = pat.exec(line)) !== null) {
+    var val = parseFloat(m[1].replace(/,/g, ''));
+    if (val > 0 && val < 10000000) amounts.push(val);
+  }
+  return amounts;
+}
+
+/**
+ * 解析 OCR 文字，提取交易明細
+ * 信用卡帳單常見格式：消費日 | 入帳日 | 說明 | 台幣金額
+ * 策略：
+ *   1. 先嘗試表格模式（一行有兩個日期 = 消費日+入帳日，取消費日）
+ *   2. 再嘗試單日期模式（一行有一個日期）
+ *   3. 最後用寬鬆模式兜底
+ */
+function parseBillText(text) {
+  var items = [];
+  // 先做基本清理：全形空白 → 半形，多重空白 → 單一空白
+  text = text.replace(/\u3000/g, ' ').replace(/\t/g, ' ');
+  var lines = text.split('\n').map(function(l) { return l.trim(); }).filter(Boolean);
+
+  // 跳過行的關鍵字（表頭、合計、頁碼等）
+  var skipRe = /合計|小計|總計|本期|繳款|利息|循環|年利率|帳單|截止|結帳|最低應繳|信用額度|TOTAL|BALANCE|PAYMENT|STATEMENT|PAGE|消費日.*入帳日|入帳日.*消費日|交易日.*金額|日期.*說明.*金額/i;
 
   for (var i = 0; i < lines.length; i++) {
     var line = lines[i];
-
-    // 跳過表頭、小計、合計行
-    if (/合計|小計|總計|本期|繳款|利息|循環|帳單|TOTAL|BALANCE|PAYMENT|STATEMENT/i.test(line)) continue;
     if (line.length < 4) continue;
+    if (skipRe.test(line)) continue;
 
-    // 嘗試匹配日期
-    var dateMatch = null;
-    var dateStr = '';
+    var dates = _extractDates(line);
+    var amounts = _extractAmounts(line);
 
-    for (var p = 0; p < datePatterns.length; p++) {
-      var dm = line.match(datePatterns[p]);
-      if (dm) {
-        dateMatch = dm;
-        if (p === 0) {
-          // YYYY/MM/DD
-          dateStr = dm[1] + '-' + dm[2].padStart(2, '0') + '-' + dm[3].padStart(2, '0');
-        } else if (p === 1) {
-          // MM/DD/YYYY
-          dateStr = dm[3] + '-' + dm[1].padStart(2, '0') + '-' + dm[2].padStart(2, '0');
-        } else if (p === 2) {
-          // MM/DD — guess year
-          var mm = parseInt(dm[1]), dd = parseInt(dm[2]);
-          if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) {
-            var yr = (mm > currentMonth) ? currentYear - 1 : currentYear;
-            dateStr = yr + '-' + dm[1].padStart(2, '0') + '-' + dm[2].padStart(2, '0');
-          } else {
-            dateMatch = null;
-          }
-        } else if (p === 3) {
-          // MM月DD日
-          var mm2 = parseInt(dm[1]), dd2 = parseInt(dm[2]);
-          var yr2 = (mm2 > currentMonth) ? currentYear - 1 : currentYear;
-          dateStr = yr2 + '-' + dm[1].padStart(2, '0') + '-' + dm[2].padStart(2, '0');
-        }
-        if (dateMatch) break;
-      }
-    }
+    // 沒有日期或沒有金額就跳過
+    if (dates.length === 0 || amounts.length === 0) continue;
 
-    if (!dateMatch) continue;
+    // 取消費日（第一個日期），忽略入帳日（第二個日期）
+    var dateStr = dates[0].date;
 
-    // 找金額（取行中最後一個數字作為金額）
-    var amounts = [];
-    var am;
-    amountPattern.lastIndex = 0;
-    while ((am = amountPattern.exec(line)) !== null) {
-      var val = parseFloat(am[1].replace(/,/g, ''));
-      if (val > 0 && val < 10000000) amounts.push(val);
-    }
-    if (amounts.length === 0) continue;
-
-    // 取最後一個數字作為金額（通常帳單格式: 日期 ... 說明 ... 金額）
+    // 取台幣金額 = 最後一個數字（帳單格式通常是：消費日 入帳日 說明 金額）
     var amount = amounts[amounts.length - 1];
 
-    // 提取說明（去掉日期和金額後的文字）
+    // 提取說明：去掉所有日期和金額後的剩餘文字
     var desc = line;
-    // 移除日期部分
-    desc = desc.replace(dateMatch[0], '');
-    // 移除所有金額
+    // 從後往前移除，避免 index 偏移
+    var removeParts = [];
+    dates.forEach(function(d) { removeParts.push(d.raw); });
     amounts.forEach(function(a) {
-      desc = desc.replace(new RegExp('[NT＄$]*\\s*' + a.toLocaleString('en').replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?:\\.\\d{1,2})?'), '');
-      desc = desc.replace(new RegExp('[NT＄$]*\\s*' + a.toString().replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?:\\.\\d{1,2})?'), '');
+      // 移除金額及其前綴符號
+      var aStr = a.toLocaleString('en-US');
+      var aStrPlain = a.toString();
+      removeParts.push(aStr);
+      if (aStr !== aStrPlain) removeParts.push(aStrPlain);
     });
-    // 清理多餘符號
-    desc = desc.replace(/[\/\-.\s]+/g, ' ').replace(/^[\s\-\/]+|[\s\-\/]+$/g, '').trim();
-    if (!desc) desc = '帳單消費';
+    // 按長度倒排，先移除長的避免部分匹配問題
+    removeParts.sort(function(a,b) { return b.length - a.length; });
+    removeParts.forEach(function(part) {
+      desc = desc.replace(new RegExp(part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), ' ');
+    });
+    // 清掉殘留的 NT$ 符號、多餘空白、前後標點
+    desc = desc.replace(/[NT＄$]+/g, ' ').replace(/\s+/g, ' ').replace(/^[\s\-\/\.,:;]+|[\s\-\/\.,:;]+$/g, '').trim();
+    if (!desc || desc.length < 2) desc = '帳單消費';
 
-    // 嘗試猜測類別
     var category = guessBillCategory(desc);
 
     items.push({
@@ -1793,7 +1829,7 @@ function parseBillText(text) {
     });
   }
 
-  // 如果解析不到任何項目，嘗試用較寬鬆的方式解析
+  // 兜底：如果完全解析不到，嘗試寬鬆模式
   if (items.length === 0) {
     items = parseBillTextLoose(text);
   }
@@ -1801,33 +1837,43 @@ function parseBillText(text) {
   return items;
 }
 
-/** 寬鬆解析：逐行找金額 */
+/** 寬鬆解析：只要行中有金額就嘗試擷取 */
 function parseBillTextLoose(text) {
   var items = [];
   var lines = text.split('\n').map(function(l) { return l.trim(); }).filter(Boolean);
   var today = new Date().toISOString().slice(0, 10);
+  var skipRe = /合計|小計|總計|本期|繳款|利息|循環|年利率|帳單|截止|結帳|最低應繳|信用額度|TOTAL|BALANCE|PAYMENT|STATEMENT|PAGE/i;
 
   for (var i = 0; i < lines.length; i++) {
     var line = lines[i];
     if (line.length < 3) continue;
-    if (/合計|小計|總計|本期|繳款|利息|循環|帳單|TOTAL|BALANCE|PAYMENT|STATEMENT/i.test(line)) continue;
+    if (skipRe.test(line)) continue;
 
-    // 找數字
-    var match = line.match(/([\d,]+(?:\.\d{1,2})?)/);
-    if (!match) continue;
-    var val = parseFloat(match[1].replace(/,/g, ''));
-    if (val <= 0 || val > 10000000) continue;
+    var amounts = _extractAmounts(line);
+    if (amounts.length === 0) continue;
+    var amount = amounts[amounts.length - 1];
+
+    // 嘗試取日期
+    var dates = _extractDates(line);
+    var dateStr = dates.length > 0 ? dates[0].date : today;
 
     // 說明
-    var desc = line.replace(match[0], '').replace(/[NT＄$\s\/\-]+/g, ' ').trim();
+    var desc = line;
+    // 移除日期和金額
+    dates.forEach(function(d) { desc = desc.replace(d.raw, ' '); });
+    amounts.forEach(function(a) {
+      desc = desc.replace(new RegExp(a.toLocaleString('en-US').replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), ' ');
+      desc = desc.replace(new RegExp(a.toString().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), ' ');
+    });
+    desc = desc.replace(/[NT＄$]+/g, ' ').replace(/\s+/g, ' ').replace(/^[\s\-\/\.,:;]+|[\s\-\/\.,:;]+$/g, '').trim();
     if (!desc || desc.length < 2) desc = '帳單消費';
 
     var category = guessBillCategory(desc);
 
     items.push({
-      date: today,
+      date: dateStr,
       desc: desc,
-      amount: val,
+      amount: amount,
       category: category,
       checked: true
     });
@@ -1841,20 +1887,20 @@ function guessBillCategory(desc) {
   var cats = d.expenseCategories || DEFAULT_EXP_CATS;
   var lower = desc.toLowerCase();
 
-  // 關鍵字對應表
+  // 關鍵字對應表（優先順序由上到下，先匹配先返回）
   var keywords = {
-    '餐飲': ['餐','食','飯','麵','咖啡','tea','coffee','food','restaurant','麥當勞','星巴克','肯德基','吃','飲','小吃','便當','pizza','burger','鍋','壽司','拉麵','早餐','午餐','晚餐','宵夜','外送','uber eats','foodpanda'],
-    '交通': ['加油','停車','高鐵','台鐵','捷運','uber','taxi','計程','公車','油','parking','transport','車','eTag','etag','悠遊'],
-    '購物': ['百貨','商城','mall','amazon','蝦皮','momo','pchome','yahoo','購物','超市','家樂福','costco','全聯','7-11','便利','超商','大潤發','好市多'],
-    '娛樂': ['電影','cinema','netflix','spotify','遊戲','game','ktv','書','book','電玩','串流','disney','youtube','premium'],
-    '醫療': ['醫院','診所','藥','hospital','clinic','pharmacy','牙','眼','health','醫','掛號'],
-    '教育': ['學費','補習','書店','課程','udemy','coursera','教育','學','tuition'],
-    '居住': ['房租','管理費','水費','電費','瓦斯','房屋','rent','utility','水電'],
-    '日用品': ['日用','清潔','衛生','洗','soap','生活','用品'],
-    '通訊': ['電信','手機','internet','網路','中華電信','遠傳','台灣大','line','通訊費'],
-    '保險': ['保險','insurance','壽險','意外','醫療險'],
-    '服飾': ['服飾','衣','鞋','帽','uniqlo','zara','h&m','clothes','fashion'],
-    '美容': ['美容','美髮','salon','spa','理髮','美甲']
+    '餐飲': ['餐廳','美食','飲料','餐','食','飯','麵','咖啡','tea','coffee','food','restaurant','麥當勞','星巴克','肯德基','吃到飽','小吃','便當','pizza','burger','鍋','壽司','拉麵','早餐','午餐','晚餐','宵夜','外送','uber eats','foodpanda','摩斯','漢堡','丹丹','鼎泰豐','八方','cama','路易莎','50嵐','清心','迷客夏','茶湯會','大苑子','鮮茶道','comebuy','麻辣','燒肉','烤肉','火鍋','牛排','brunch','甜點','蛋糕','烘焙','酒','bar','pub','居酒屋','熱炒'],
+    '交通': ['加油','停車','高鐵','台鐵','捷運','uber','taxi','計程','公車','中油','台塑','parking','transport','eTag','etag','悠遊','irent','格上','和運','gogoro','wemo','共享','機車','汽車','客運','台灣大車隊','yoxi','line taxi'],
+    '購物': ['百貨','商城','mall','amazon','蝦皮','momo','pchome','yahoo','購物','超市','家樂福','costco','全聯','7-11','便利','超商','大潤發','好市多','全家','萊爾富','ok超商','ikea','特力屋','寶雅','屈臣氏','康是美','光南','誠品','無印','muji','apple','三創','nova','shopee','露天','博客來','金石堂'],
+    '娛樂': ['電影','cinema','netflix','spotify','遊戲','game','ktv','電玩','串流','disney','youtube','premium','kkbox','apple music','steam','switch','ps5','xbox','任天堂','威秀','秀泰','國賓','華納','旅遊','飯店','hotel','airbnb','booking','agoda','klook','kkday','樂園','遊樂','門票','展覽','演唱會','music','健身','gym','瑜珈','運動'],
+    '醫療': ['醫院','診所','藥局','藥','hospital','clinic','pharmacy','牙醫','眼科','health','醫','掛號','健保','長庚','台大','馬偕','國泰','亞東','振興','中醫','復健','手術','門診','急診'],
+    '教育': ['學費','補習','書店','課程','udemy','coursera','教育','tuition','幼稚園','安親','才藝','家教','英語','日語','hahow','yotta'],
+    '居住': ['房租','管理費','水費','電費','瓦斯','房屋','rent','utility','水電','天然氣','台電','台水','社區','修繕','裝潢','清潔費'],
+    '日用品': ['日用','清潔','衛生','洗衣','detergent','生活','用品','衛生紙','洗髮','沐浴','牙膏','廚房'],
+    '通訊': ['電信','手機','internet','網路','中華電信','遠傳','台灣大','台灣之星','亞太','通訊費','月租','icloud','google storage'],
+    '保險': ['保險','insurance','壽險','意外險','醫療險','車險','國泰人壽','富邦人壽','南山人壽','新光人壽'],
+    '服飾': ['服飾','衣','鞋','帽','uniqlo','zara','h&m','clothes','fashion','gu ','net ','lativ','nike','adidas','puma','new balance'],
+    '美容': ['美容','美髮','salon','spa','理髮','美甲','按摩','massage','保養','化妝']
   };
 
   for (var cat in keywords) {

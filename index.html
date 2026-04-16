@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>FlowRich 記帳理財</title>
 <link rel="stylesheet" href="style.css">
+<link rel="icon" type="image/x-icon" href="favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
+<link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 </head>
@@ -16,6 +19,7 @@
 <!-- ==================== 登入畫面 ==================== -->
 <div class="login-overlay" id="loginOverlay">
   <div class="login-box" id="loginView">
+    <img src="logo-192.png" alt="FlowRich" class="login-logo">
     <h1>FlowRich</h1>
     <p>個人記帳理財系統（雲端版）</p>
     <div class="login-error" id="loginError"></div>
@@ -25,6 +29,7 @@
     <button class="btn-secondary" onclick="showRegister()">還沒有帳號？點此註冊</button>
   </div>
   <div class="login-box" id="registerView" style="display:none">
+    <img src="logo-192.png" alt="FlowRich" class="login-logo">
     <h1>FlowRich</h1>
     <p>建立新帳號</p>
     <div class="login-error" id="registerError"></div>
@@ -41,7 +46,7 @@
 
   <!-- 桌面側邊欄 -->
   <div class="sidebar">
-    <div class="logo">FlowRich</div>
+    <div class="logo"><img src="favicon-32x32.png" alt="" class="logo-icon">FlowRich</div>
     <div class="user-info" id="sidebarUser"></div>
     <div class="nav-item active" data-page="dashboard" onclick="switchPage('dashboard')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
