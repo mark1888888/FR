@@ -438,9 +438,10 @@ function genId() {
 function fmt(n, cur) {
   cur = cur || 'TWD';
   var sym = { TWD:'NT$', USD:'$', JPY:'¥', EUR:'€', CNY:'¥' }[cur] || '';
+  var noDecimal = cur === 'TWD' || cur === 'JPY';
   return sym + Number(n).toLocaleString('en', {
-    minimumFractionDigits: cur === 'JPY' ? 0 : 2,
-    maximumFractionDigits: cur === 'JPY' ? 0 : 2
+    minimumFractionDigits: noDecimal ? 0 : 2,
+    maximumFractionDigits: noDecimal ? 0 : 2
   });
 }
 
