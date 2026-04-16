@@ -875,7 +875,6 @@ function renderReceivables(isRecv) {
   if (!d.receivables) d.receivables = [];
   var typeFilter = isRecv ? 'receivable' : 'payable';
   var list = d.receivables.filter(function(r) { return r.type === typeFilter; });
-  // 按應付日期排序（最近的在上面）
   list.sort(function(a, b) { return (a.dueDate || '').localeCompare(b.dueDate || ''); });
 
   var today = new Date().toISOString().slice(0, 10);
@@ -884,7 +883,7 @@ function renderReceivables(isRecv) {
     var overdueDays = 0;
     var statusHtml = '';
     if (r.status === 'paid') {
-      statusHtml = '<span class="tag tag-green">已收款</span>';
+      statusHtml = '<span class="tag tag-green">' + (isRecv ? '已收款' : '已付款') + '</span>';
     } else if (r.dueDate && r.dueDate < today) {
       var d1 = new Date(today), d2 = new Date(r.dueDate);
       overdueDays = Math.floor((d1 - d2) / 86400000);
@@ -894,6 +893,7 @@ function renderReceivables(isRecv) {
     } else {
       statusHtml = '<span class="tag tag-blue">未到期</span>';
     }
+    var ac = d.accounts.find(function(a) { return a.id === r.accountId; });
     return '<tr' + (overdueDays > 0 ? ' style="background:rgba(239,68,68,.05)"' : '') + '>' +
       '<td>' + (r.date || '-') + '</td>' +
       '<td>' + (r.dueDate || '-') + '</td>' +
@@ -902,29 +902,45 @@ function renderReceivables(isRecv) {
       '<td>' + (r.note || '-') + '</td>' +
       '<td style="font-weight:600" class="' + (isRecv ? 'c-orange' : 'c-red') + '">' + fmt(r.amount, r.currency) + '</td>' +
       '<td>' + (r.currency || 'TWD') + '</td>' +
+      '<td>' + (ac ? ac.name : '-') + '</td>' +
       '<td>' +
-        (r.status !== 'paid' ? '<span class="edit-btn" onclick="markReceivablePaid(\'' + r.id + '\')" title="標記已收款">✅</span>' : '') +
+        (r.status !== 'paid' ? '<span class="edit-btn" onclick="markReceivablePaid(\'' + r.id + '\')" title="' + (isRecv ? '標記已收款' : '標記已付款') + '">✅</span>' : '') +
         '<span class="edit-btn" onclick="editReceivable(\'' + r.id + '\')">✏️</span>' +
         '<span class="del-btn" onclick="deleteReceivable(\'' + r.id + '\')">✕</span>' +
       '</td></tr>';
-  }).join('') : '<tr><td colspan="8" style="text-align:center;color:var(--text3);padding:40px">尚無' + (isRecv ? '應收款' : '應付款') + '記錄</td></tr>';
+  }).join('') : '<tr><td colspan="9" style="text-align:center;color:var(--text3);padding:40px">尚無' + (isRecv ? '應收款' : '應付款') + '記錄</td></tr>';
 }
 
 function markReceivablePaid(id) {
-  if (!confirm('確定標記為已收款？')) return;
   var d = U();
-  var r = (d.receivables || []).find(function(r) { return r.id === id; });
-  if (r) { r.status = 'paid'; save(); renderAssets(); }
+  var r = (d.receivables || []).find(function(rv) { return rv.id === id; });
+  if (!r) return;
+  var isRecv = r.type === 'receivable';
+  showConfirmModal(isRecv ? '確定標記為已收款？金額將存入對應帳戶。' : '確定標記為已付款？金額將從對應帳戶扣除。', function() {
+    r.status = 'paid';
+    // 更新對應帳戶餘額
+    if (r.accountId) {
+      var acct = d.accounts.find(function(a) { return a.id === r.accountId; });
+      if (acct) {
+        var amt = convert(r.amount, r.currency, acct.currency);
+        if (isRecv) acct.balance += amt;
+        else acct.balance -= amt;
+      }
+    }
+    save(); renderAssets();
+    showToast(isRecv ? '已收款，金額已存入帳戶' : '已付款，金額已從帳戶扣除');
+  });
 }
 
 function editReceivable(id) { openModal('receivable', id); }
 
 function deleteReceivable(id) {
-  if (!confirm('確定刪除此筆記錄？')) return;
-  var d = U();
-  d.receivables = (d.receivables || []).filter(function(r) { return r.id !== id; });
-  save();
-  renderAssets();
+  showConfirmModal('確定刪除此筆記錄？', function() {
+    var d = U();
+    d.receivables = (d.receivables || []).filter(function(r) { return r.id !== id; });
+    save();
+    renderAssets();
+  });
 }
 
 function saveReceivable() {
@@ -939,6 +955,7 @@ function saveReceivable() {
     target: document.getElementById('f_target').value.trim(),
     amount: parseFloat(document.getElementById('f_amt').value) || 0,
     currency: document.getElementById('f_cur').value,
+    accountId: document.getElementById('f_acct').value,
     note: document.getElementById('f_note').value.trim(),
     status: 'pending'
   };
@@ -1179,28 +1196,33 @@ function renderAssetAnalysisSection() {
 }
 
 // ============ 投資情報 ============
-function renderInvest() { loadNews(); loadStocks(); loadIndices(); }
+function renderInvest() { loadNews(); loadStocks(); loadPreciousMetals(); loadCryptoNews(); }
 
 async function loadNews() {
   var el = document.getElementById('newsContainer');
+  el.innerHTML = '<p style="color:var(--text3)">載入中...</p>';
+  var today = new Date().toLocaleDateString('zh-TW', { year: 'numeric', month: 'long', day: 'numeric' });
+  var header = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><span style="font-size:12px;color:var(--text3)">每日 8:00 更新</span><span style="font-size:12px;color:var(--text3)">' + today + '</span></div>';
   try {
     var r = await fetch('https://newsdata.io/api/1/latest?apikey=pub_64aboreal&category=business&language=zh&country=tw');
     var d = await r.json();
     if (d.results && d.results.length) {
-      el.innerHTML = d.results.slice(0, 8).map(function(n) {
-        return '<div class="news-card"><div class="news-title">' + (n.title || '無標題') +
-          '</div><div class="news-meta">' + (n.description || '').slice(0, 100) +
-          ((n.description || '').length > 100 ? '...' : '') +
-          '</div><div class="news-src">' + (n.source_id || '') + ' \u00B7 ' +
-          (n.pubDate ? n.pubDate.slice(0, 10) : '') + '</div></div>';
+      el.innerHTML = header + d.results.slice(0, 10).map(function(n) {
+        var link = n.link || '#';
+        return '<a href="' + link + '" target="_blank" rel="noopener" class="news-card" style="display:block;text-decoration:none;color:inherit;cursor:pointer">' +
+          '<div class="news-title">' + (n.title || '無標題') +
+          ' <span style="font-size:11px;color:var(--primary-light)">↗</span></div>' +
+          '<div class="news-meta">' + (n.description || '').slice(0, 120) +
+          ((n.description || '').length > 120 ? '...' : '') +
+          '</div><div class="news-src">' + (n.source_id || '') + ' · ' +
+          (n.pubDate ? n.pubDate.slice(0, 10) : '') + '</div></a>';
       }).join('');
       return;
     }
   } catch (e) { /* 靜默處理 */ }
-  // 備用：顯示通用資訊
-  var today = new Date().toLocaleDateString('zh-TW', { year: 'numeric', month: 'long', day: 'numeric' });
-  el.innerHTML =
-    '<div class="news-card"><div class="news-title">全球經濟動態</div><div class="news-meta">' + today + ' \u2014 請關注美聯儲利率決策、歐洲央行政策動向、中國經濟數據及地緣政治風險。建議查看 Bloomberg、Reuters 等專業財經網站獲取最新資訊。</div></div>' +
+  // 備用
+  el.innerHTML = header +
+    '<div class="news-card"><div class="news-title">全球經濟動態</div><div class="news-meta">請關注美聯儲利率決策、歐洲央行政策動向、中國經濟數據及地緣政治風險。建議查看 Bloomberg、Reuters 等專業財經網站獲取最新資訊。</div></div>' +
     '<div class="news-card"><div class="news-title">台灣市場焦點</div><div class="news-meta">台股動態受半導體產業、AI 趨勢及外資動向影響。建議關注台積電法說會、外資買賣超、央行政策及台幣匯率走勢。</div></div>' +
     '<div class="news-card"><div class="news-title">投資提醒</div><div class="news-meta">以上為一般性資訊，不構成投資建議。投資有風險，請依個人狀況審慎評估。</div></div>';
 }
@@ -1319,21 +1341,73 @@ async function loadStocks() {
     }).join('');
 }
 
-async function loadIndices() {
-  var el = document.getElementById('indexContainer');
-  var indices = [
-    { name: '台灣加權指數', code: 'TAIEX' },
-    { name: '道瓊工業', code: 'DJI' },
-    { name: 'S&P 500', code: 'SPX' },
-    { name: '那斯達克', code: 'NASDAQ' },
-    { name: '日經225', code: 'N225' },
-    { name: '上證指數', code: 'SSE' }
-  ];
-  el.innerHTML = indices.map(function(idx) {
-    return '<div class="stock-card"><div><div class="stock-name">' + idx.name +
-      '</div><div class="stock-code">' + idx.code +
-      '</div></div><div style="text-align:right;color:var(--text3)">請參考專業財經平台</div></div>';
+async function loadPreciousMetals() {
+  var el = document.getElementById('metalsContainer');
+  if (!el) return;
+  el.innerHTML = '<p style="color:var(--text3)">載入中...</p>';
+  var items = [];
+  // 貴金屬 & 加密貨幣：使用 CoinGecko 免費 API
+  try {
+    var r = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,tether&vs_currencies=usd,twd&include_24hr_change=true');
+    var cd = await r.json();
+    if (cd.bitcoin) items.push({ name: '比特幣 Bitcoin', code: 'BTC', price: cd.bitcoin.usd, priceTwd: cd.bitcoin.twd, change: cd.bitcoin.usd_24h_change || 0 });
+    if (cd.ethereum) items.push({ name: '以太幣 Ethereum', code: 'ETH', price: cd.ethereum.usd, priceTwd: cd.ethereum.twd, change: cd.ethereum.usd_24h_change || 0 });
+  } catch (e) { /* 靜默處理 */ }
+  // 貴金屬使用 metals.dev 或 fallback
+  try {
+    var mr = await fetch('https://api.metals.dev/v1/latest?api_key=demo&currency=USD&unit=toz');
+    var md = await mr.json();
+    if (md.metals) {
+      if (md.metals.gold) items.unshift({ name: '黃金 Gold', code: 'XAU', price: md.metals.gold, priceTwd: md.metals.gold * (rates.USD ? 1/rates.USD : 31.5), change: 0, isOz: true });
+      if (md.metals.silver) items.unshift({ name: '白銀 Silver', code: 'XAG', price: md.metals.silver, priceTwd: md.metals.silver * (rates.USD ? 1/rates.USD : 31.5), change: 0, isOz: true });
+    }
+  } catch (e) {
+    // Fallback: 顯示靜態參考
+    if (!items.find(function(i) { return i.code === 'XAU'; })) {
+      items.unshift({ name: '黃金 Gold', code: 'XAU', price: null, priceTwd: null, change: 0, isOz: true });
+      items.unshift({ name: '白銀 Silver', code: 'XAG', price: null, priceTwd: null, change: 0, isOz: true });
+    }
+  }
+  if (!items.length) {
+    el.innerHTML = '<p style="color:var(--text3)">暫時無法取得價格資料，請稍後再試</p>';
+    return;
+  }
+  el.innerHTML = items.map(function(s) {
+    var up = s.change >= 0;
+    var priceStr = s.price ? ('$' + s.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })) : '--';
+    var twdStr = s.priceTwd ? ('NT$' + Math.round(s.priceTwd).toLocaleString()) : '';
+    var unit = s.isOz ? '/oz' : '';
+    return '<div class="stock-card"><div><div class="stock-name">' + s.name +
+      '</div><div class="stock-code">' + s.code + '</div></div>' +
+      '<div style="text-align:right"><div class="stock-price">' + priceStr + unit +
+      '</div>' + (twdStr ? '<div style="font-size:11px;color:var(--text3)">' + twdStr + unit + '</div>' : '') +
+      (s.change ? '<div class="stock-change ' + (up ? 'c-green' : 'c-red') + '">' +
+      (up ? '+' : '') + s.change.toFixed(2) + '%</div>' : '') +
+      '</div></div>';
   }).join('');
+}
+
+async function loadCryptoNews() {
+  var el = document.getElementById('cryptoNewsContainer');
+  if (!el) return;
+  el.innerHTML = '<p style="color:var(--text3)">載入中...</p>';
+  try {
+    var r = await fetch('https://newsdata.io/api/1/latest?apikey=pub_64aboreal&q=crypto%20OR%20bitcoin%20OR%20ethereum&language=en&category=business');
+    var d = await r.json();
+    if (d.results && d.results.length) {
+      el.innerHTML = d.results.slice(0, 10).map(function(n) {
+        var link = n.link || '#';
+        return '<a href="' + link + '" target="_blank" rel="noopener" class="news-card" style="display:block;text-decoration:none;color:inherit;cursor:pointer">' +
+          '<div class="news-title">' + (n.title || '無標題') + '</div>' +
+          '<div class="news-meta">' + (n.description || '').slice(0, 120) +
+          ((n.description || '').length > 120 ? '...' : '') + '</div>' +
+          '<div class="news-src">' + (n.source_id || '') + ' · ' +
+          (n.pubDate ? n.pubDate.slice(0, 10) : '') + '</div></a>';
+      }).join('');
+      return;
+    }
+  } catch (e) { /* 靜默處理 */ }
+  el.innerHTML = '<p style="color:var(--text3)">暫無幣圈新聞，請稍後再試</p>';
 }
 
 function addWatchStock() {
@@ -1616,17 +1690,20 @@ function openModal(type, editId) {
   } else if (type === 'receivable') {
     var isRecv = currentAssetTab !== 'payable';
     var label = isRecv ? '應收款' : '應付款';
-    var targetLabel = isRecv ? '應付款對象/機構' : '應付款對象/機構';
     var editing5 = editId ? (d.receivables || []).find(function(r) { return r.id === editId; }) : null;
     var curOpts5 = Object.entries(CURRENCIES).map(function(entry) {
       return '<option value="' + entry[0] + '"' + (editing5 && editing5.currency === entry[0] ? ' selected' : '') + '>' + entry[0] + ' ' + entry[1] + '</option>';
     }).join('');
+    var acctOpts5 = d.accounts.map(function(a) {
+      return '<option value="' + a.id + '"' + (editing5 && editing5.accountId === a.id ? ' selected' : '') + '>' + a.name + '</option>';
+    }).join('');
     m.innerHTML = '<h3>' + (editing5 ? '編輯' : '新增') + label + '</h3>' +
       '<div class="form-row"><div class="form-group"><label>建立日期</label><input type="date" id="f_date" value="' + (editing5 ? editing5.date : new Date().toISOString().slice(0, 10)) + '"></div>' +
       '<div class="form-group"><label>應付日期（到期日）</label><input type="date" id="f_dueDate" value="' + (editing5 ? editing5.dueDate || '' : '') + '"></div></div>' +
-      '<div class="form-group"><label>' + targetLabel + '</label><input type="text" id="f_target" placeholder="例：張先生 / 台電公司" value="' + (editing5 ? editing5.target || '' : '') + '"></div>' +
+      '<div class="form-group"><label>' + (isRecv ? '付款對象/機構' : '應付對象/機構') + '</label><input type="text" id="f_target" placeholder="例：張先生 / 台電公司" value="' + (editing5 ? editing5.target || '' : '') + '"></div>' +
       '<div class="form-row"><div class="form-group"><label>金額</label><input type="number" id="f_amt" step="0.01" value="' + (editing5 ? editing5.amount : '') + '"></div>' +
       '<div class="form-group"><label>幣別</label><select id="f_cur">' + curOpts5 + '</select></div></div>' +
+      '<div class="form-group"><label>' + (isRecv ? '收款帳戶' : '付款帳戶') + '</label><select id="f_acct">' + acctOpts5 + '</select></div>' +
       '<div class="form-group"><label>備註</label><input type="text" id="f_note" value="' + (editing5 ? editing5.note || '' : '') + '"></div>' +
       '<input type="hidden" id="f_editId" value="' + (editId || '') + '">' +
       '<div class="modal-actions"><button class="btn btn-s" onclick="closeModal()">取消</button><button class="btn btn-p" onclick="saveReceivable()">儲存</button></div>';
@@ -1745,19 +1822,21 @@ function saveAccount() {
 function editAccount(id) { openModal('account', id); }
 
 function deleteAccount(id) {
-  if (!confirm('確定刪除？')) return;
-  var d = U();
-  d.accounts = d.accounts.filter(function(a) { return a.id !== id; });
-  save(); renderAssets();
+  showConfirmModal('確定刪除此帳戶？', function() {
+    var d = U();
+    d.accounts = d.accounts.filter(function(a) { return a.id !== id; });
+    save(); renderAssets();
+  });
 }
 
 function deleteRecord(col, id) {
-  if (!confirm('確定刪除？')) return;
-  var d = U();
-  d[col] = d[col].filter(function(r) { return r.id !== id; });
-  save();
-  if (col === 'incomes') renderIncome();
-  else renderExpense();
+  showConfirmModal('確定刪除此筆記錄？', function() {
+    var d = U();
+    d[col] = d[col].filter(function(r) { return r.id !== id; });
+    save();
+    if (col === 'incomes') renderIncome();
+    else renderExpense();
+  });
 }
 
 // ============ 帳戶轉帳 ============
@@ -1801,19 +1880,20 @@ function saveTransfer() {
 }
 
 function deleteTransfer(id) {
-  if (!confirm('確定刪除此轉帳記錄？')) return;
-  var d = U();
-  if (!d.transfers) return;
-  var tf = d.transfers.find(function(t) { return t.id === id; });
-  if (tf) {
-    // 復原帳戶餘額
-    var fromAcct = d.accounts.find(function(a) { return a.id === tf.fromAccountId; });
-    var toAcct = d.accounts.find(function(a) { return a.id === tf.toAccountId; });
-    if (fromAcct) fromAcct.balance += convert(tf.amount, tf.currency, fromAcct.currency);
-    if (toAcct) toAcct.balance -= convert(tf.amount, tf.currency, toAcct.currency);
-  }
-  d.transfers = d.transfers.filter(function(t) { return t.id !== id; });
-  save(); renderTransfer();
+  showConfirmModal('確定刪除此轉帳記錄？', function() {
+    var d = U();
+    if (!d.transfers) return;
+    var tf = d.transfers.find(function(t) { return t.id === id; });
+    if (tf) {
+      // 復原帳戶餘額
+      var fromAcct = d.accounts.find(function(a) { return a.id === tf.fromAccountId; });
+      var toAcct = d.accounts.find(function(a) { return a.id === tf.toAccountId; });
+      if (fromAcct) fromAcct.balance += convert(tf.amount, tf.currency, fromAcct.currency);
+      if (toAcct) toAcct.balance -= convert(tf.amount, tf.currency, toAcct.currency);
+    }
+    d.transfers = d.transfers.filter(function(t) { return t.id !== id; });
+    save(); renderTransfer();
+  });
 }
 
 function renderTransfer() {
@@ -1917,15 +1997,16 @@ function addCategory(type) {
 }
 
 function removeCategory(type, idx) {
-  if (!confirm('確定刪除此類別？（含所有子類別）')) return;
-  var d = U();
-  var catName;
-  if (type === 'income') { catName = d.incomeCategories[idx]; d.incomeCategories.splice(idx, 1); }
-  else { catName = d.expenseCategories[idx]; d.expenseCategories.splice(idx, 1); }
-  // 同時移除子類別
-  if (d.subCategories && catName) delete d.subCategories[catName];
-  save();
-  loadCategories();
+  showConfirmModal('確定刪除此類別？（含所有子類別）', function() {
+    var d = U();
+    var catName;
+    if (type === 'income') { catName = d.incomeCategories[idx]; d.incomeCategories.splice(idx, 1); }
+    else { catName = d.expenseCategories[idx]; d.expenseCategories.splice(idx, 1); }
+    // 同時移除子類別
+    if (d.subCategories && catName) delete d.subCategories[catName];
+    save();
+    loadCategories();
+  });
 }
 
 function toggleSubCatInput(cat) {
@@ -1954,14 +2035,15 @@ function addSubCategory(cat) {
 }
 
 function removeSubCategory(cat, idx) {
-  if (!confirm('確定刪除此子類別？')) return;
-  var d = U();
-  if (d.subCategories && d.subCategories[cat]) {
-    d.subCategories[cat].splice(idx, 1);
-    if (d.subCategories[cat].length === 0) delete d.subCategories[cat];
-  }
-  save();
-  loadCategories();
+  showConfirmModal('確定刪除此子類別？', function() {
+    var d = U();
+    if (d.subCategories && d.subCategories[cat]) {
+      d.subCategories[cat].splice(idx, 1);
+      if (d.subCategories[cat].length === 0) delete d.subCategories[cat];
+    }
+    save();
+    loadCategories();
+  });
 }
 
 /** 取得類別的完整顯示名稱（含子類別）*/
@@ -2066,12 +2148,13 @@ function importData(e) {
   e.target.value = '';
 }
 
-async function resetAll() {
-  if (!confirm('確定要清除所有資料嗎？此操作無法復原！')) return;
-  DB = defaultUserData();
-  save();
-  await cloudSave();
-  location.reload();
+function resetAll() {
+  showConfirmModal('確定要清除所有資料嗎？此操作無法復原！', async function() {
+    DB = defaultUserData();
+    save();
+    await cloudSave();
+    location.reload();
+  });
 }
 
 // ============ 信用卡帳單 OCR 掃描 ============
@@ -2678,6 +2761,45 @@ function saveBillExpenses() {
   } else {
     showToast('沒有有效的消費記錄可建檔', 'warn');
   }
+}
+
+/** 顯示確認彈窗（取代 confirm） */
+function showConfirmModal(msg, onConfirm) {
+  var overlay = document.getElementById('confirmModalOverlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'confirmModalOverlay';
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML =
+      '<div class="modal" style="max-width:380px;text-align:center">' +
+        '<div style="font-size:40px;margin-bottom:12px">⚠️</div>' +
+        '<p id="confirmModalMsg" style="font-size:15px;line-height:1.6;margin-bottom:24px;color:var(--text)"></p>' +
+        '<div class="modal-actions" style="justify-content:center;gap:12px">' +
+          '<button class="btn btn-s" id="confirmModalCancel">取消</button>' +
+          '<button class="btn btn-danger" id="confirmModalOk">確定</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', function(e) {
+      if (e.target === overlay) {
+        overlay.classList.remove('show');
+      }
+    });
+  }
+  document.getElementById('confirmModalMsg').textContent = msg;
+  overlay.classList.add('show');
+  // 綁定按鈕事件（每次重新綁定避免閉包問題）
+  var okBtn = document.getElementById('confirmModalOk');
+  var cancelBtn = document.getElementById('confirmModalCancel');
+  var newOk = okBtn.cloneNode(true);
+  var newCancel = cancelBtn.cloneNode(true);
+  okBtn.parentNode.replaceChild(newOk, okBtn);
+  cancelBtn.parentNode.replaceChild(newCancel, cancelBtn);
+  newCancel.addEventListener('click', function() { overlay.classList.remove('show'); });
+  newOk.addEventListener('click', function() {
+    overlay.classList.remove('show');
+    if (typeof onConfirm === 'function') onConfirm();
+  });
 }
 
 /** 顯示 Toast 提示（取代 alert） */

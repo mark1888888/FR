@@ -587,6 +587,51 @@ th.sortable:hover{background:rgba(108,99,255,.1)}
   .bill-item{padding:10px;gap:8px}
   .bill-item-row{flex-wrap:wrap}
   .bill-item-row input,.bill-item-row select{font-size:12px;min-width:0;flex:1 1 45%}
+
+  /* 應收款表格優化 */
+  #receivableSection table{min-width:700px}
+  #receivableSection th,#receivableSection td{padding:8px 10px;font-size:12px;white-space:nowrap}
+
+  /* 資產 tab 欄可水平滾動 */
+  #assetTabBar{
+    flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;
+    gap:2px;padding:3px;scrollbar-width:none;
+  }
+  #assetTabBar::-webkit-scrollbar{display:none}
+  #assetTabBar .tab-btn{padding:6px 10px;font-size:11px;white-space:nowrap;flex-shrink:0}
+
+  /* 表格操作按鈕不換行 */
+  td .btn-group,td div[style*="gap"]{flex-wrap:nowrap}
+
+  /* form-group 在 modal 裡的間距 */
+  .form-group{margin-bottom:12px}
+  .form-group label{font-size:12px;margin-bottom:4px}
+  .form-group input,.form-group select,.form-group textarea{font-size:14px;padding:10px 12px}
+
+  /* 子類別管理手機優化 */
+  .cat-group{padding:10px;margin-bottom:8px}
+  .sub-cat-row{padding:4px 0;font-size:12px}
+  .sub-cat-add{gap:6px}
+  .sub-cat-add input{font-size:12px;padding:6px 8px}
+
+  /* 新聞卡片手機觸控友好 */
+  a.news-card{padding:14px;margin-bottom:8px}
+  a.news-card:active{opacity:0.7}
+  .news-card .news-title{font-size:13px;line-height:1.5}
+  .news-card .news-meta{font-size:12px;line-height:1.4}
+
+  /* 投資卡片手機適配 */
+  .stock-card{gap:6px}
+  .stock-card .stock-name{font-size:13px}
+  .stock-card .stock-code{font-size:11px}
+  .stock-card .stock-change{font-size:11px}
+
+  /* 確認彈窗手機適配 */
+  #confirmModalOverlay .modal{
+    max-width:90vw;
+    border-radius:16px;
+    margin:0 auto;
+  }
 }
 
 /* ============ 極小螢幕 (max-width: 400px) ============ */
@@ -599,5 +644,13 @@ th.sortable:hover{background:rgba(108,99,255,.1)}
   .login-box{padding:24px 16px;margin:0 8px}
   .modal{padding:20px 16px}
   .filter-bar{gap:6px}
+  .filter-bar select,.filter-bar input{font-size:11px;padding:6px 8px}
+  .filter-bar .btn{font-size:11px;padding:6px 10px}
   .chart-container{padding:12px}
+  table{min-width:500px}
+  th{padding:8px 8px;font-size:10px}
+  td{padding:8px 8px;font-size:12px}
+  .stock-card{padding:10px}
+  .news-card{padding:10px}
+  #confirmModalOverlay .modal{max-width:95vw;padding:20px 16px}
 }
