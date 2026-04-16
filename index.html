@@ -62,10 +62,6 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
       <span>收支分析</span>
     </div>
-    <div class="nav-item" data-page="assetAnalysis" onclick="switchPage('assetAnalysis')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a10 10 0 0110 10"/><path d="M12 12l6-6"/></svg>
-      <span>資產分析</span>
-    </div>
     <div class="nav-item" data-page="invest" onclick="switchPage('invest')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
       <span>投資情報</span>
@@ -118,8 +114,77 @@
         <div class="table-header"><h3>最近交易</h3></div>
         <div class="table-scroll-wrap">
           <table>
-            <thead><tr><th>日期</th><th>類型</th><th>類別</th><th>說明</th><th>金額</th><th>帳戶</th></tr></thead>
+            <thead><tr><th>日期</th><th>類型</th><th>類別</th><th>說明</th><th>對象</th><th>金額</th><th>帳戶</th></tr></thead>
             <tbody id="dashRecent"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ==================== 資產分析（合併至總覽） ==================== -->
+      <div class="filter-bar" style="margin-top:28px">
+        <select id="aasRange" onchange="renderAssetAnalysisSection()">
+          <option value="all">全部</option><option value="year">本年度</option><option value="month">本月份</option>
+        </select>
+        <select id="aasCurrency" onchange="renderAssetAnalysisSection()">
+          <option value="TWD">TWD</option><option value="USD">USD</option>
+          <option value="JPY">JPY</option><option value="EUR">EUR</option>
+          <option value="CNY">CNY</option>
+        </select>
+      </div>
+      <div class="stat-grid" id="aasStats"></div>
+      <div class="dual-grid">
+        <div class="chart-container">
+          <h3>正資產分佈</h3>
+          <div class="pie-chart-wrap">
+            <canvas id="aasTypePie" width="180" height="180"></canvas>
+            <div class="pie-legend" id="aasTypeLegend"></div>
+          </div>
+        </div>
+        <div class="chart-container">
+          <h3>幣別分佈</h3>
+          <div class="pie-chart-wrap">
+            <canvas id="aasCurPie" width="180" height="180"></canvas>
+            <div class="pie-legend" id="aasCurLegend"></div>
+          </div>
+        </div>
+      </div>
+      <div class="dual-grid">
+        <div class="chart-container">
+          <h3>負債（信用卡）分佈</h3>
+          <div class="pie-chart-wrap">
+            <canvas id="aasDebtPie" width="180" height="180"></canvas>
+            <div class="pie-legend" id="aasDebtLegend"></div>
+          </div>
+        </div>
+        <div class="chart-container">
+          <h3>應付款分佈</h3>
+          <div class="pie-chart-wrap">
+            <canvas id="aasPayPie" width="180" height="180"></canvas>
+            <div class="pie-legend" id="aasPayLegend"></div>
+          </div>
+        </div>
+      </div>
+      <div class="chart-container">
+        <h3>各帳戶餘額排行</h3>
+        <div id="aasAcctBar"></div>
+      </div>
+      <div class="chart-container">
+        <h3>未收款追蹤</h3>
+        <div class="stat-grid" id="aasReceivableStats"></div>
+        <div class="table-scroll-wrap">
+          <table>
+            <thead><tr><th>帳戶名稱</th><th>對象</th><th>幣別</th><th>金額</th><th>備註</th></tr></thead>
+            <tbody id="aasReceivableTable"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="chart-container">
+        <h3>應付款追蹤</h3>
+        <div class="stat-grid" id="aasPayableStats"></div>
+        <div class="table-scroll-wrap">
+          <table>
+            <thead><tr><th>帳戶名稱</th><th>對象</th><th>幣別</th><th>金額</th><th>備註</th></tr></thead>
+            <tbody id="aasPayableTable"></tbody>
           </table>
         </div>
       </div>
@@ -141,7 +206,7 @@
         <div class="table-header"><h3>收入列表</h3></div>
         <div class="table-scroll-wrap">
           <table>
-            <thead><tr><th>日期</th><th>類別</th><th>說明</th><th>金額</th><th>幣別</th><th>帳戶</th><th>操作</th></tr></thead>
+            <thead><tr><th>日期</th><th>類別</th><th>說明</th><th>支付對象</th><th>使用對象</th><th>金額</th><th>幣別</th><th>帳戶</th><th>操作</th></tr></thead>
             <tbody id="incTable"></tbody>
           </table>
         </div>
@@ -169,7 +234,7 @@
         <div class="table-header"><h3>支出列表</h3></div>
         <div class="table-scroll-wrap">
           <table>
-            <thead><tr><th>日期</th><th>類別</th><th>說明</th><th>金額</th><th>幣別</th><th>支付方式</th><th>帳戶</th><th>操作</th></tr></thead>
+            <thead><tr><th>日期</th><th>類別</th><th>說明</th><th>支付對象</th><th>使用對象</th><th>金額</th><th>幣別</th><th>支付方式</th><th>帳戶</th><th>操作</th></tr></thead>
             <tbody id="expTable"></tbody>
           </table>
         </div>
@@ -254,87 +319,6 @@
       </div>
     </div>
 
-    <!-- ==================== 資產分析 ==================== -->
-    <div class="page" id="page-assetAnalysis">
-      <div class="page-title">資產分析</div>
-      <div class="filter-bar">
-        <select id="aasRange" onchange="renderAssetAnalysis()">
-          <option value="all">全部</option><option value="year">本年度</option><option value="month">本月份</option>
-        </select>
-        <select id="aasCurrency" onchange="renderAssetAnalysis()">
-          <option value="TWD">TWD</option><option value="USD">USD</option>
-          <option value="JPY">JPY</option><option value="EUR">EUR</option>
-          <option value="CNY">CNY</option>
-        </select>
-      </div>
-      <div class="stat-grid" id="aasStats"></div>
-
-      <!-- 正資產分佈 & 幣別分佈 -->
-      <div class="dual-grid">
-        <div class="chart-container">
-          <h3>正資產分佈</h3>
-          <div class="pie-chart-wrap">
-            <canvas id="aasTypePie" width="180" height="180"></canvas>
-            <div class="pie-legend" id="aasTypeLegend"></div>
-          </div>
-        </div>
-        <div class="chart-container">
-          <h3>幣別分佈</h3>
-          <div class="pie-chart-wrap">
-            <canvas id="aasCurPie" width="180" height="180"></canvas>
-            <div class="pie-legend" id="aasCurLegend"></div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 負債（信用卡）& 應付款分佈 -->
-      <div class="dual-grid">
-        <div class="chart-container">
-          <h3>負債（信用卡）分佈</h3>
-          <div class="pie-chart-wrap">
-            <canvas id="aasDebtPie" width="180" height="180"></canvas>
-            <div class="pie-legend" id="aasDebtLegend"></div>
-          </div>
-        </div>
-        <div class="chart-container">
-          <h3>應付款分佈</h3>
-          <div class="pie-chart-wrap">
-            <canvas id="aasPayPie" width="180" height="180"></canvas>
-            <div class="pie-legend" id="aasPayLegend"></div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 各帳戶餘額排行 -->
-      <div class="chart-container">
-        <h3>各帳戶餘額排行</h3>
-        <div id="aasAcctBar"></div>
-      </div>
-
-      <!-- 未收款追蹤 -->
-      <div class="chart-container">
-        <h3>未收款追蹤</h3>
-        <div class="stat-grid" id="aasReceivableStats"></div>
-        <div class="table-scroll-wrap">
-          <table>
-            <thead><tr><th>帳戶名稱</th><th>對象</th><th>幣別</th><th>金額</th><th>備註</th></tr></thead>
-            <tbody id="aasReceivableTable"></tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- 應付款追蹤（Bug 3 新增） -->
-      <div class="chart-container">
-        <h3>應付款追蹤</h3>
-        <div class="stat-grid" id="aasPayableStats"></div>
-        <div class="table-scroll-wrap">
-          <table>
-            <thead><tr><th>帳戶名稱</th><th>對象</th><th>幣別</th><th>金額</th><th>備註</th></tr></thead>
-            <tbody id="aasPayableTable"></tbody>
-          </table>
-        </div>
-      </div>
-    </div>
 
     <!-- ==================== 投資情報 ==================== -->
     <div class="page" id="page-invest">
@@ -426,19 +410,20 @@
         <button class="btn btn-p" onclick="changePwd()" style="margin-top:8px">更新密碼</button>
       </div>
       <div class="chart-container" style="margin-top:20px">
-        <h3>自訂類別</h3>
-        <div class="form-row" style="margin-bottom:12px">
-          <div>
-            <label style="font-size:13px;color:var(--text2)">收入類別</label>
-            <textarea id="incCats" rows="4" style="width:100%;padding:10px;background:var(--card);border:1px solid var(--border);border-radius:10px;color:var(--text);margin-top:6px;font-size:13px"></textarea>
-          </div>
-          <div>
-            <label style="font-size:13px;color:var(--text2)">支出類別</label>
-            <textarea id="expCats" rows="4" style="width:100%;padding:10px;background:var(--card);border:1px solid var(--border);border-radius:10px;color:var(--text);margin-top:6px;font-size:13px"></textarea>
-          </div>
+        <h3>自訂收入類別</h3>
+        <div id="incCatList"></div>
+        <div class="form-row" style="margin-top:12px">
+          <input type="text" id="newIncCat" placeholder="新類別名稱" style="padding:10px;background:var(--card);border:1px solid var(--border);border-radius:10px;color:var(--text);font-size:13px">
+          <button class="btn btn-p btn-sm" onclick="addCategory('income')">+ 新增</button>
         </div>
-        <button class="btn btn-p" onclick="saveCategories()">儲存類別</button>
-        <p style="font-size:12px;color:var(--text3);margin-top:8px">每行一個類別名稱</p>
+      </div>
+      <div class="chart-container" style="margin-top:20px">
+        <h3>自訂支出類別</h3>
+        <div id="expCatList"></div>
+        <div class="form-row" style="margin-top:12px">
+          <input type="text" id="newExpCat" placeholder="新類別名稱" style="padding:10px;background:var(--card);border:1px solid var(--border);border-radius:10px;color:var(--text);font-size:13px">
+          <button class="btn btn-p btn-sm" onclick="addCategory('expense')">+ 新增</button>
+        </div>
       </div>
       <div class="chart-container" style="margin-top:20px;border-color:var(--red)">
         <h3 style="color:var(--red)">危險區域</h3>
@@ -470,10 +455,6 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
       <span>分析</span>
     </div>
-    <div class="bottom-nav-item" data-page="assetAnalysis" onclick="switchPage('assetAnalysis')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a10 10 0 0110 10"/><path d="M12 12l6-6"/></svg>
-      <span>資產</span>
-    </div>
     <div class="bottom-nav-item" data-page="settings" onclick="switchPage('settings')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
       <span>設定</span>
@@ -485,6 +466,15 @@
 <!-- Modal -->
 <div class="modal-overlay" id="modalOverlay" onclick="if(event.target===this)closeModal()">
   <div class="modal" id="modalContent"></div>
+</div>
+
+<!-- Icon Picker -->
+<div class="modal-overlay" id="iconPickerOverlay" onclick="if(event.target===this)closeIconPicker()">
+  <div class="modal" style="max-width:380px">
+    <h3>選擇圖示</h3>
+    <div class="icon-grid" id="iconPickerGrid"></div>
+    <div class="modal-actions"><button class="btn btn-s" onclick="closeIconPicker()">取消</button></div>
+  </div>
 </div>
 
 <script src="app.js"></script>

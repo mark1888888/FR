@@ -12,8 +12,26 @@ const CAT_ICONS = {
   '捐款':'❤️','稅務':'📝','社交':'🤝','房租':'🔑','貸款':'💳','投資':'📊',
   '股利':'💹','租金收入':'🏢','退款':'🔄','禮金':'🎁','中獎':'🎰',
 };
+const ICON_OPTIONS = [
+  '💰','💵','💴','💶','💷','🏆','📈','💼','🏦','💹','🏢','🔄','🎁','🎰',
+  '🍽️','🍔','🍕','🍜','☕','🥗','🥤','🍻','🍰','🍎',
+  '🚗','🚌','🚇','🚕','🚲','✈️','🚂','⛽','🚁','🛳️',
+  '🛍️','👗','👔','👟','💄','💍','⌚','📱','💻','🖥️',
+  '🎮','🎬','🎵','🎤','🎲','🎯','🎪','🎭','🎨','📷',
+  '🏥','💊','🏋️','💪','🧘','🏊','🏃','⚽','🎾','🏀',
+  '📚','✏️','🎓','🏫','👨‍🎓','📖','🔬','🧪',
+  '🏠','🏡','🔑','💡','🛁','🔧','🧹','🧴','🧻',
+  '📞','📡','💬','📮','🔔',
+  '🛡️','⚖️','📝','📋','📊','💳','🏧','💱',
+  '🐾','🐕','🐈','🐟','🐦','🐰',
+  '💇','💅','💆','❤️','🤝','🎉','🎊','💒','👶',
+  '🏖️','⛰️','🏕️','🎢','🗺️','🌍',
+  '📌','⭐','✅','❌','⚡','🔥','💎','🌈','☀️','🌙'
+];
+
 /** 取得類別圖示，若找不到則根據關鍵字推測 */
 function getIcon(cat) {
+  if (DB && DB.categoryIcons && DB.categoryIcons[cat]) return DB.categoryIcons[cat];
   return CAT_ICONS[cat] || (
     cat.includes('餐') ? '🍽️' :
     cat.includes('交通') ? '🚗' :
@@ -71,6 +89,7 @@ function defaultUserData() {
     incomes: [],
     expenses: [],
     watchStocks: ['2330','2317','2454'],
+    categoryIcons: {},
     updated_at: new Date().toISOString()  // Bug 1: 加入時間戳
   };
 }
@@ -246,7 +265,6 @@ function rerenderActivePage() {
       expense: renderExpense,
       assets: renderAssets,
       analysis: renderAnalysis,
-      assetAnalysis: renderAssetAnalysis,
       invest: renderInvest
     };
     if (renders[pageId]) renders[pageId]();
@@ -265,6 +283,7 @@ document.addEventListener('visibilitychange', function() {
 /** 取得資料並確保 watchStocks 欄位存在 */
 function U() {
   if (!DB.watchStocks) DB.watchStocks = ['2330','2317','2454'];
+  if (!DB.categoryIcons) DB.categoryIcons = {};
   if (!DB.updated_at) DB.updated_at = new Date().toISOString();
   return DB;
 }
@@ -278,7 +297,7 @@ function toggleTheme() {
   var ap = document.querySelector('.page.active');
   if (ap) {
     var id = ap.id.replace('page-', '');
-    var r = { dashboard: renderDashboard, analysis: renderAnalysis, assetAnalysis: renderAssetAnalysis };
+    var r = { dashboard: renderDashboard, analysis: renderAnalysis };
     if (r[id]) r[id]();
   }
 }
@@ -535,7 +554,6 @@ function switchPage(page) {
     expense: renderExpense,
     assets: renderAssets,
     analysis: renderAnalysis,
-    assetAnalysis: renderAssetAnalysis,
     invest: renderInvest
   };
   if (renders[page]) renders[page]();
@@ -578,17 +596,19 @@ function renderDashboard() {
 
   document.getElementById('dashRecent').innerHTML = all.length ? all.map(function(t) {
     var ac = d.accounts.find(function(a) { return a.id === t.accountId; });
+    var objStr = (t.payTo || t.usedBy) ? ((t.payTo || '') + (t.payTo && t.usedBy ? '/' : '') + (t.usedBy || '')) : '-';
     return '<tr><td>' + t.date + '</td><td><span class="tag ' +
       (t._t === 'inc' ? 'tag-green' : 'tag-red') + '">' +
       (t._t === 'inc' ? '收入' : '支出') + '</span></td><td><span class="cat-icon">' +
       getIcon(t.category) + '</span>' + t.category + '</td><td>' +
-      (t.note || '-') + '</td><td style="font-weight:600" class="' +
+      (t.note || '-') + '</td><td>' + objStr + '</td><td style="font-weight:600" class="' +
       (t._t === 'inc' ? 'c-green' : 'c-red') + '">' +
       (t._t === 'inc' ? '+' : '\u2212') + fmt(t.amount, t.currency) +
       '</td><td>' + (ac ? ac.name : '-') + '</td></tr>';
-  }).join('') : '<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:40px">尚無交易記錄</td></tr>';
+  }).join('') : '<tr><td colspan="7" style="text-align:center;color:var(--text3);padding:40px">尚無交易記錄</td></tr>';
 
   drawDashChart(month, cur);
+  renderAssetAnalysisSection();
 }
 
 function drawDashChart(month, cur) {
@@ -649,11 +669,12 @@ function renderIncome() {
     var ac = d.accounts.find(function(a) { return a.id === i.accountId; });
     return '<tr><td>' + i.date + '</td><td><span class="tag tag-green"><span class="cat-icon">' +
       getIcon(i.category) + '</span>' + i.category + '</span></td><td>' + (i.note || '-') +
+      '</td><td>' + (i.payTo || '-') + '</td><td>' + (i.usedBy || '-') +
       '</td><td class="c-green" style="font-weight:600">+' + fmt(i.amount, i.currency) +
       '</td><td>' + i.currency + '</td><td>' + (ac ? ac.name : '-') +
       '</td><td><span class="edit-btn" onclick="editRecord(\'income\',\'' + i.id + '\')">✏️</span>' +
       '<span class="del-btn" onclick="deleteRecord(\'incomes\',\'' + i.id + '\')">✕</span></td></tr>';
-  }).join('') : '<tr><td colspan="7" style="text-align:center;color:var(--text3);padding:40px">尚無收入記錄</td></tr>';
+  }).join('') : '<tr><td colspan="9" style="text-align:center;color:var(--text3);padding:40px">尚無收入記錄</td></tr>';
 }
 
 // ============ 支出 ============
@@ -683,12 +704,13 @@ function renderExpense() {
     var tc2 = e.payMethod === '信用卡' ? 'tag-orange' : e.payMethod === '現金' ? 'tag-purple' : 'tag-blue';
     return '<tr><td>' + e.date + '</td><td><span class="tag tag-red"><span class="cat-icon">' +
       getIcon(e.category) + '</span>' + e.category + '</span></td><td>' + (e.note || '-') +
+      '</td><td>' + (e.payTo || '-') + '</td><td>' + (e.usedBy || '-') +
       '</td><td class="c-red" style="font-weight:600">\u2212' + fmt(e.amount, e.currency) +
       '</td><td>' + e.currency + '</td><td><span class="tag ' + tc2 + '">' + e.payMethod +
       '</span></td><td>' + (ac ? ac.name : '-') +
       '</td><td><span class="edit-btn" onclick="editRecord(\'expense\',\'' + e.id + '\')">✏️</span>' +
       '<span class="del-btn" onclick="deleteRecord(\'expenses\',\'' + e.id + '\')">✕</span></td></tr>';
-  }).join('') : '<tr><td colspan="8" style="text-align:center;color:var(--text3);padding:40px">尚無支出記錄</td></tr>';
+  }).join('') : '<tr><td colspan="10" style="text-align:center;color:var(--text3);padding:40px">尚無支出記錄</td></tr>';
 }
 
 // ============ 資產管理 ============
@@ -818,8 +840,8 @@ function renderAnalysis() {
   drawMonthlyChart(cur);
 }
 
-// ============ 資產分析（Bug 3 修正：分 4 類獨立圖表） ============
-function renderAssetAnalysis() {
+// ============ 資產分析（合併至總覽） ============
+function renderAssetAnalysisSection() {
   var d = U();
   var cur = document.getElementById('aasCurrency').value;
   var range = document.getElementById('aasRange').value;
@@ -915,7 +937,8 @@ function renderAssetAnalysis() {
 
   // 各帳戶餘額排行
   drawBarChart('aasAcctBar',
-    d.accounts.map(function(a) {
+    d.accounts.filter(function(a) { return a.type !== 'receivable' && a.type !== 'payable'; })
+    .map(function(a) {
       return [a.name + ' (' + a.currency + ')', convert(a.balance, a.currency, cur)];
     }).sort(function(a, b) { return b[1] - a[1]; }),
     cur
@@ -986,42 +1009,60 @@ async function loadStocks() {
     return;
   }
   el.innerHTML = '<p style="color:var(--text3)">載入股價中...</p>';
-  var loaded = false;
+  var results = [];
+  var yahooSuccess = false;
 
-  // 方法 1：TWSE 上市
+  // 方法 1：Yahoo Finance via CORS proxy
   try {
-    var r = await fetch('https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=' +
-      d.watchStocks.map(function(c) { return 'tse_' + c + '.tw'; }).join('|') +
-      '&json=1&_=' + Date.now());
-    var data = await r.json();
-    if (data.msgArray && data.msgArray.length) {
-      el.innerHTML = data.msgArray.map(function(s) {
-        var price = parseFloat(s.z) || parseFloat(s.y) || 0;
-        var yesterday = parseFloat(s.y) || 0;
-        var change = price - yesterday;
-        var pct = yesterday ? ((change / yesterday) * 100) : 0;
-        var up = change >= 0;
-        return '<div class="stock-card"><div><div class="stock-name">' + (s.n || s.c) +
-          '</div><div class="stock-code">' + s.c + '.TW</div></div>' +
-          '<div style="text-align:right"><div class="stock-price">' + (price ? price.toFixed(2) : '--') +
+    var promises = d.watchStocks.map(function(code) {
+      var url = 'https://corsproxy.io/?url=https://query1.finance.yahoo.com/v8/finance/chart/' + code + '.TW?interval=1d&range=5d';
+      return fetch(url).then(function(r) { return r.json(); }).then(function(data) {
+        if (data.chart && data.chart.result && data.chart.result[0]) {
+          var meta = data.chart.result[0].meta;
+          var price = meta.regularMarketPrice || 0;
+          var prevClose = meta.chartPreviousClose || 0;
+          var change = price - prevClose;
+          var pct = prevClose ? ((change / prevClose) * 100) : 0;
+          return { code: code, name: meta.shortName || meta.symbol || code, price: price, change: change, pct: pct };
+        }
+        return { code: code, name: code, price: 0, change: 0, pct: 0, failed: true };
+      }).catch(function() {
+        return { code: code, name: code, price: 0, change: 0, pct: 0, failed: true };
+      });
+    });
+    results = await Promise.all(promises);
+    var successCount = results.filter(function(r) { return !r.failed; }).length;
+    if (successCount > 0) {
+      yahooSuccess = true;
+      el.innerHTML = results.map(function(s) {
+        if (s.failed) {
+          return '<div class="stock-card"><div><div class="stock-name">' + s.code +
+            '</div><div class="stock-code">' + s.code + '.TW</div></div>' +
+            '<div style="text-align:right"><div class="stock-price" style="color:var(--text3)">--</div>' +
+            '<div style="font-size:11px;color:var(--text3)">無法載入</div></div>' +
+            '<span class="del-btn" onclick="removeStock(\'' + s.code + '\')" style="margin-left:12px">✕</span></div>';
+        }
+        var up = s.change >= 0;
+        return '<div class="stock-card"><div><div class="stock-name">' + s.name +
+          '</div><div class="stock-code">' + s.code + '.TW</div></div>' +
+          '<div style="text-align:right"><div class="stock-price">' + (s.price ? s.price.toFixed(2) : '--') +
           '</div><div class="stock-change ' + (up ? 'c-green' : 'c-red') + '">' +
-          (up ? '+' : '') + change.toFixed(2) + ' (' + (up ? '+' : '') + pct.toFixed(2) + '%)</div></div>' +
-          '<span class="del-btn" onclick="removeStock(\'' + s.c + '\')" style="margin-left:12px" title="移除追蹤">✕</span></div>';
+          (up ? '+' : '') + s.change.toFixed(2) + ' (' + (up ? '+' : '') + s.pct.toFixed(2) + '%)</div></div>' +
+          '<span class="del-btn" onclick="removeStock(\'' + s.code + '\')" style="margin-left:12px" title="移除追蹤">✕</span></div>';
       }).join('');
-      loaded = true;
       return;
     }
   } catch (e) { /* 靜默處理 */ }
 
-  // 方法 2：OTC 上櫃
-  if (!loaded) {
+  // 方法 2：TWSE 上市（fallback）
+  if (!yahooSuccess) {
     try {
-      var r2 = await fetch('https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=' +
-        d.watchStocks.map(function(c) { return 'otc_' + c + '.tw'; }).join('|') +
+      var r = await fetch('https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=' +
+        d.watchStocks.map(function(c) { return 'tse_' + c + '.tw'; }).join('|') +
         '&json=1&_=' + Date.now());
-      var data2 = await r2.json();
-      if (data2.msgArray && data2.msgArray.length) {
-        el.innerHTML = data2.msgArray.map(function(s) {
+      var data = await r.json();
+      if (data.msgArray && data.msgArray.length) {
+        el.innerHTML = data.msgArray.map(function(s) {
           var price = parseFloat(s.z) || parseFloat(s.y) || 0;
           var yesterday = parseFloat(s.y) || 0;
           var change = price - yesterday;
@@ -1034,21 +1075,43 @@ async function loadStocks() {
             (up ? '+' : '') + change.toFixed(2) + ' (' + (up ? '+' : '') + pct.toFixed(2) + '%)</div></div>' +
             '<span class="del-btn" onclick="removeStock(\'' + s.c + '\')" style="margin-left:12px" title="移除追蹤">✕</span></div>';
         }).join('');
-        loaded = true;
         return;
       }
     } catch (e) { /* 靜默處理 */ }
   }
 
-  // 備用：顯示 CORS 提示
+  // 方法 3：OTC 上櫃（fallback）
+  try {
+    var r2 = await fetch('https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=' +
+      d.watchStocks.map(function(c) { return 'otc_' + c + '.tw'; }).join('|') +
+      '&json=1&_=' + Date.now());
+    var data2 = await r2.json();
+    if (data2.msgArray && data2.msgArray.length) {
+      el.innerHTML = data2.msgArray.map(function(s) {
+        var price = parseFloat(s.z) || parseFloat(s.y) || 0;
+        var yesterday = parseFloat(s.y) || 0;
+        var change = price - yesterday;
+        var pct = yesterday ? ((change / yesterday) * 100) : 0;
+        var up = change >= 0;
+        return '<div class="stock-card"><div><div class="stock-name">' + (s.n || s.c) +
+          '</div><div class="stock-code">' + s.c + '.TW</div></div>' +
+          '<div style="text-align:right"><div class="stock-price">' + (price ? price.toFixed(2) : '--') +
+          '</div><div class="stock-change ' + (up ? 'c-green' : 'c-red') + '">' +
+          (up ? '+' : '') + change.toFixed(2) + ' (' + (up ? '+' : '') + pct.toFixed(2) + '%)</div></div>' +
+          '<span class="del-btn" onclick="removeStock(\'' + s.c + '\')" style="margin-left:12px" title="移除追蹤">✕</span></div>';
+      }).join('');
+      return;
+    }
+  } catch (e) { /* 靜默處理 */ }
+
+  // 備用：顯示提示
   el.innerHTML = '<div style="background:rgba(245,158,11,.1);border:1px solid var(--orange);border-radius:12px;padding:16px;margin-bottom:16px;font-size:13px;color:var(--orange)">' +
-    '<strong>提示：</strong>台股即時報價 API (TWSE) 在某些環境下可能因 CORS 限制無法載入。<br>' +
-    '建議方式：<br>• 將此頁面部署到網站伺服器上（非直接開啟 HTML 檔案）<br>• 或使用簡易伺服器：在終端輸入 <code style="background:var(--card);padding:2px 6px;border-radius:4px">npx serve .</code> 或 <code style="background:var(--card);padding:2px 6px;border-radius:4px">python -m http.server</code><br>• 透過 http://localhost 存取即可正常取得股價</div>' +
+    '<strong>提示：</strong>股價 API 暫時無法連線，請稍後再試。</div>' +
     d.watchStocks.map(function(c) {
       return '<div class="stock-card"><div><div class="stock-name">' + c +
         '</div><div class="stock-code">' + c + '.TW</div></div>' +
         '<div style="text-align:right"><div class="stock-price" style="color:var(--text3)">無法載入</div>' +
-        '<div style="font-size:11px;color:var(--text3)">CORS 限制</div></div>' +
+        '<div style="font-size:11px;color:var(--text3)">連線失敗</div></div>' +
         '<span class="del-btn" onclick="removeStock(\'' + c + '\')" style="margin-left:12px">✕</span></div>';
     }).join('');
 }
@@ -1213,6 +1276,8 @@ function openModal(type, editId) {
       '<div class="form-row"><div class="form-group"><label>金額</label><input type="number" id="f_amt" step="0.01" value="' + (editing ? editing.amount : '') + '"></div>' +
       '<div class="form-group"><label>幣別</label><select id="f_cur">' + curOpts + '</select></div></div>' +
       '<div class="form-group"><label>備註</label><input type="text" id="f_note" value="' + (editing ? editing.note || '' : '') + '"></div>' +
+      '<div class="form-row"><div class="form-group"><label>支付對象</label><input type="text" id="f_payTo" placeholder="例：新民小學" value="' + (editing ? editing.payTo || '' : '') + '"></div>' +
+      '<div class="form-group"><label>使用對象</label><input type="text" id="f_usedBy" placeholder="例：女兒" value="' + (editing ? editing.usedBy || '' : '') + '"></div></div>' +
       '<input type="hidden" id="f_editId" value="' + (editId || '') + '">' +
       '<div class="modal-actions"><button class="btn btn-s" onclick="closeModal()">取消</button><button class="btn btn-p" onclick="saveIncome()">儲存</button></div>';
   } else if (type === 'expense') {
@@ -1237,6 +1302,8 @@ function openModal(type, editId) {
       '<div class="form-group"><label>幣別</label><select id="f_cur">' + curOpts2 + '</select></div></div>' +
       '<div class="form-group"><label>帳戶</label><select id="f_acct">' + acctOpts2 + '</select></div>' +
       '<div class="form-group"><label>備註</label><input type="text" id="f_note" value="' + (editing2 ? editing2.note || '' : '') + '"></div>' +
+      '<div class="form-row"><div class="form-group"><label>支付對象</label><input type="text" id="f_payTo" placeholder="例：新民小學" value="' + (editing2 ? editing2.payTo || '' : '') + '"></div>' +
+      '<div class="form-group"><label>使用對象</label><input type="text" id="f_usedBy" placeholder="例：女兒" value="' + (editing2 ? editing2.usedBy || '' : '') + '"></div></div>' +
       '<input type="hidden" id="f_editId" value="' + (editId || '') + '">' +
       '<div class="modal-actions"><button class="btn btn-s" onclick="closeModal()">取消</button><button class="btn btn-p" onclick="saveExpense()">儲存</button></div>';
   } else if (type === 'account') {
@@ -1280,7 +1347,9 @@ function saveIncome() {
     accountId: document.getElementById('f_acct').value,
     amount: amt,
     currency: document.getElementById('f_cur').value,
-    note: document.getElementById('f_note').value
+    note: document.getElementById('f_note').value,
+    payTo: document.getElementById('f_payTo').value,
+    usedBy: document.getElementById('f_usedBy').value
   };
   if (editId) {
     var old = d.incomes.find(function(i) { return i.id === editId; });
@@ -1311,7 +1380,9 @@ function saveExpense() {
     accountId: document.getElementById('f_acct').value,
     amount: amt,
     currency: document.getElementById('f_cur').value,
-    note: document.getElementById('f_note').value
+    note: document.getElementById('f_note').value,
+    payTo: document.getElementById('f_payTo').value,
+    usedBy: document.getElementById('f_usedBy').value
   };
   if (editId) {
     var old = d.expenses.find(function(e) { return e.id === editId; });
@@ -1378,16 +1449,74 @@ function deleteRecord(col, id) {
 // ============ 設定 ============
 function loadCategories() {
   var d = U();
-  document.getElementById('incCats').value = d.incomeCategories.join('\n');
-  document.getElementById('expCats').value = d.expenseCategories.join('\n');
+  renderCategoryList('incCatList', d.incomeCategories, 'income');
+  renderCategoryList('expCatList', d.expenseCategories, 'expense');
 }
 
-function saveCategories() {
+function renderCategoryList(containerId, cats, type) {
+  var el = document.getElementById(containerId);
+  if (!el) return;
+  el.innerHTML = cats.map(function(cat, idx) {
+    return '<div class="cat-row">' +
+      '<span class="cat-icon-btn" onclick="openIconPicker(\'' + cat.replace(/'/g, "\\'") + '\')" title="更改圖示">' + getIcon(cat) + '</span>' +
+      '<span class="cat-name">' + cat + '</span>' +
+      '<span class="del-btn" onclick="removeCategory(\'' + type + '\',' + idx + ')">✕</span>' +
+      '</div>';
+  }).join('');
+}
+
+function addCategory(type) {
   var d = U();
-  d.incomeCategories = document.getElementById('incCats').value.split('\n').map(function(s) { return s.trim(); }).filter(Boolean);
-  d.expenseCategories = document.getElementById('expCats').value.split('\n').map(function(s) { return s.trim(); }).filter(Boolean);
+  var inputId = type === 'income' ? 'newIncCat' : 'newExpCat';
+  var name = document.getElementById(inputId).value.trim();
+  if (!name) { alert('請輸入類別名稱'); return; }
+  if (type === 'income') {
+    if (d.incomeCategories.includes(name)) { alert('類別已存在'); return; }
+    d.incomeCategories.push(name);
+  } else {
+    if (d.expenseCategories.includes(name)) { alert('類別已存在'); return; }
+    d.expenseCategories.push(name);
+  }
+  document.getElementById(inputId).value = '';
   save();
-  alert('類別已更新');
+  loadCategories();
+}
+
+function removeCategory(type, idx) {
+  if (!confirm('確定刪除此類別？')) return;
+  var d = U();
+  if (type === 'income') d.incomeCategories.splice(idx, 1);
+  else d.expenseCategories.splice(idx, 1);
+  save();
+  loadCategories();
+}
+
+// ============ Icon Picker ============
+var _iconPickerCallback = null;
+
+function openIconPicker(category) {
+  _iconPickerCallback = category;
+  var overlay = document.getElementById('iconPickerOverlay');
+  var grid = document.getElementById('iconPickerGrid');
+  grid.innerHTML = ICON_OPTIONS.map(function(icon) {
+    return '<span class="icon-option" onclick="selectIcon(\'' + icon + '\')">' + icon + '</span>';
+  }).join('');
+  overlay.classList.add('show');
+}
+
+function selectIcon(icon) {
+  if (!_iconPickerCallback) return;
+  var d = U();
+  if (!d.categoryIcons) d.categoryIcons = {};
+  d.categoryIcons[_iconPickerCallback] = icon;
+  save();
+  closeIconPicker();
+  loadCategories();
+}
+
+function closeIconPicker() {
+  document.getElementById('iconPickerOverlay').classList.remove('show');
+  _iconPickerCallback = null;
 }
 
 async function changePwd() {
