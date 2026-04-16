@@ -7,7 +7,7 @@
 -- 1. get_all_user_data()
 --    取得所有使用者資料（僅限管理員呼叫）
 --    此函式使用 SECURITY DEFINER，以便存取 auth.users 表
---    管理員白名單寫在函式內部，與前端保持一致
+--    管理員白名單實在函式內部（與前端保持一致
 -- ============================================================
 CREATE OR REPLACE FUNCTION public.get_all_user_data()
 RETURNS TABLE (
@@ -71,7 +71,7 @@ BEGIN
    WHERE au.id = auth.uid();
 
   -- 檢查是否為管理員
-  IF caller_email IS NULL OR caller_email NOT IN ('mark800413@gmail.com') THEN
+  IF caller_email IS NULL OR caller_email NOT IN ('mark400413@gmail.com') THEN
     RAISE EXCEPTION 'Unauthorized';
   END IF;
 
@@ -103,7 +103,7 @@ GRANT EXECUTE ON FUNCTION public.admin_delete_user(uuid) TO authenticated;
 --
 -- 注意事項：
 -- - 若需新增管理員，請同時修改兩個地方：
---   (a) admin.html 中的 ADMIN_EMAILS 陣列
+--   (a) admin.html 中的 ADMIN_EMAILS 鉣列
 --   (b) 本 SQL 檔中兩個函式內的 IN (...) 白名單
 -- - SECURITY DEFINER 函式會以建立者的權限執行，
 --   因此能存取 auth.users 表。請確保只有管理員能呼叫。
