@@ -44,11 +44,11 @@ function getIcon(cat) {
 // ============ 常數 ============
 const DEFAULT_INC_CATS = ['薪資','獎金','投資收益','兼職','利息','其他收入'];
 const DEFAULT_EXP_CATS = ['餐飲','交通','購物','娛樂','醫療','教育','居住','日用品','通訊','保險','其他支出'];
-const CURRENCIES = { TWD:'新台幣', USD:'美元', JPY:'日圓', EUR:'歐元', CNY:'人民幣' };
+const CURRENCIES = { TWD:'新台幣', USD:'美元', JPY:'日圓', EUR:'歐元', CNY:'人民幣', KRW:'韓元', HKD:'港幣' };
 const ACCOUNT_TYPES = { bank:'銀行存款', cash:'現金', credit:'信用卡', receivable:'未收款', payable:'應付款', invest:'投資/其他' };
 const PIE_COLORS = ['#6c63ff','#00d2ff','#22c55e','#f59e0b','#ef4444','#ec4899','#8b5cf6','#14b8a6','#f97316','#64748b','#a855f7','#06b6d4'];
 
-let rates = { TWD:1, USD:0.0313, JPY:4.69, EUR:0.0289, CNY:0.2273 };
+let rates = { TWD:1, USD:0.0313, JPY:4.69, EUR:0.0289, CNY:0.2273, KRW:44.5, HKD:0.244 };
 let DB = null, currentUser = '', currentUserId = '';
 
 // ============ SUPABASE 初始化 ============
@@ -92,6 +92,7 @@ function defaultUserData() {
     watchStocks: ['2330','2317','2454'],
     categoryIcons: {},
     subCategories: {},   // { '教育': ['學費','午餐費','多元課程費'], '餐飲': ['外食','飲料'] }
+    receivables: [],     // 應收款記錄
     updated_at: new Date().toISOString()
   };
 }
@@ -458,7 +459,8 @@ function initMonthSelectors() {
   var months = [], now = new Date();
   var curY = now.getFullYear(), curM = now.getMonth();
   var cur = curY + '-' + (curM + 1 < 10 ? '0' : '') + (curM + 1);
-  for (var i = 11; i >= 0; i--) {
+  // 最新月份排在最上面
+  for (var i = 0; i <= 11; i++) {
     var y2 = new Date(curY, curM - i, 1);
     var mm = y2.getFullYear() + '-' + ((y2.getMonth() + 1) < 10 ? '0' : '') + (y2.getMonth() + 1);
     months.push(mm);
@@ -523,6 +525,8 @@ async function fetchRates() {
       rates.JPY = d.rates.JPY;
       rates.EUR = d.rates.EUR;
       rates.CNY = d.rates.CNY;
+      if (d.rates.KRW) rates.KRW = d.rates.KRW;
+      if (d.rates.HKD) rates.HKD = d.rates.HKD;
     }
   } catch (e) { /* 靜默處理 */ }
   renderRateTable();
@@ -848,7 +852,109 @@ function renderAssets() {
       '<span class="del-btn" onclick="deleteAccount(\'' + a.id + '\')">✕</span></td></tr>';
   }).join('') : '<tr><td colspan="7" style="text-align:center;color:var(--text3);padding:40px">尚無帳戶</td></tr>';
 
+  // 應收款/應付款明細區塊
+  var recvSection = document.getElementById('receivableSection');
+  if (recvSection) {
+    if (currentAssetTab === 'receivable' || currentAssetTab === 'payable') {
+      recvSection.style.display = 'block';
+      var isRecv = currentAssetTab === 'receivable';
+      document.getElementById('recvTableTitle').textContent = isRecv ? '應收款明細' : '應付款明細';
+      recvSection.querySelector('button').onclick = function() { openModal('receivable'); };
+      renderReceivables(isRecv);
+    } else {
+      recvSection.style.display = 'none';
+    }
+  }
+
   initAssetDrag();
+}
+
+// ============ 應收款/應付款明細 ============
+function renderReceivables(isRecv) {
+  var d = U();
+  if (!d.receivables) d.receivables = [];
+  var typeFilter = isRecv ? 'receivable' : 'payable';
+  var list = d.receivables.filter(function(r) { return r.type === typeFilter; });
+  // 按應付日期排序（最近的在上面）
+  list.sort(function(a, b) { return (a.dueDate || '').localeCompare(b.dueDate || ''); });
+
+  var today = new Date().toISOString().slice(0, 10);
+  var tb = document.getElementById('recvTable');
+  tb.innerHTML = list.length ? list.map(function(r) {
+    var overdueDays = 0;
+    var statusHtml = '';
+    if (r.status === 'paid') {
+      statusHtml = '<span class="tag tag-green">已收款</span>';
+    } else if (r.dueDate && r.dueDate < today) {
+      var d1 = new Date(today), d2 = new Date(r.dueDate);
+      overdueDays = Math.floor((d1 - d2) / 86400000);
+      statusHtml = '<span class="tag tag-red">逾期 ' + overdueDays + ' 天</span>';
+    } else if (r.dueDate && r.dueDate === today) {
+      statusHtml = '<span class="tag tag-orange">今日到期</span>';
+    } else {
+      statusHtml = '<span class="tag tag-blue">未到期</span>';
+    }
+    return '<tr' + (overdueDays > 0 ? ' style="background:rgba(239,68,68,.05)"' : '') + '>' +
+      '<td>' + (r.date || '-') + '</td>' +
+      '<td>' + (r.dueDate || '-') + '</td>' +
+      '<td>' + statusHtml + '</td>' +
+      '<td style="font-weight:600">' + (r.target || '-') + '</td>' +
+      '<td>' + (r.note || '-') + '</td>' +
+      '<td style="font-weight:600" class="' + (isRecv ? 'c-orange' : 'c-red') + '">' + fmt(r.amount, r.currency) + '</td>' +
+      '<td>' + (r.currency || 'TWD') + '</td>' +
+      '<td>' +
+        (r.status !== 'paid' ? '<span class="edit-btn" onclick="markReceivablePaid(\'' + r.id + '\')" title="標記已收款">✅</span>' : '') +
+        '<span class="edit-btn" onclick="editReceivable(\'' + r.id + '\')">✏️</span>' +
+        '<span class="del-btn" onclick="deleteReceivable(\'' + r.id + '\')">✕</span>' +
+      '</td></tr>';
+  }).join('') : '<tr><td colspan="8" style="text-align:center;color:var(--text3);padding:40px">尚無' + (isRecv ? '應收款' : '應付款') + '記錄</td></tr>';
+}
+
+function markReceivablePaid(id) {
+  if (!confirm('確定標記為已收款？')) return;
+  var d = U();
+  var r = (d.receivables || []).find(function(r) { return r.id === id; });
+  if (r) { r.status = 'paid'; save(); renderAssets(); }
+}
+
+function editReceivable(id) { openModal('receivable', id); }
+
+function deleteReceivable(id) {
+  if (!confirm('確定刪除此筆記錄？')) return;
+  var d = U();
+  d.receivables = (d.receivables || []).filter(function(r) { return r.id !== id; });
+  save();
+  renderAssets();
+}
+
+function saveReceivable() {
+  var d = U();
+  if (!d.receivables) d.receivables = [];
+  var editId = document.getElementById('f_editId').value;
+  var obj = {
+    id: editId || Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+    type: currentAssetTab === 'payable' ? 'payable' : 'receivable',
+    date: document.getElementById('f_date').value,
+    dueDate: document.getElementById('f_dueDate').value,
+    target: document.getElementById('f_target').value.trim(),
+    amount: parseFloat(document.getElementById('f_amt').value) || 0,
+    currency: document.getElementById('f_cur').value,
+    note: document.getElementById('f_note').value.trim(),
+    status: 'pending'
+  };
+  if (!obj.amount) { alert('請輸入金額'); return; }
+  if (!obj.target) { alert('請輸入對象/機構'); return; }
+
+  if (editId) {
+    var idx = d.receivables.findIndex(function(r) { return r.id === editId; });
+    if (idx >= 0) { var old = d.receivables[idx]; obj.status = old.status; d.receivables[idx] = obj; }
+  } else {
+    d.receivables.push(obj);
+  }
+  save();
+  closeModal();
+  renderAssets();
+  showToast((currentAssetTab === 'payable' ? '應付款' : '應收款') + '已儲存');
 }
 
 // ============ 資產拖拽排序 ============
@@ -909,8 +1015,8 @@ function renderAnalysis() {
     '<div class="stat-card"><div class="label">淨收支</div><div class="value ' + (tI - tE >= 0 ? 'c-green' : 'c-red') + '">' + fmt(tI - tE, cur) + '</div></div>' +
     '<div class="stat-card"><div class="label">儲蓄率</div><div class="value c-primary">' + sr.toFixed(1) + '%</div></div>';
 
-  drawPie('expPieChart', 'expPieLegend', groupByCategory(exp, cur), cur);
-  drawPie('incPieChart', 'incPieLegend', groupByCategory(inc, cur), cur);
+  drawPie('expPieChart', 'expPieLegend', groupByCategory(exp, cur), cur, false, true);
+  drawPie('incPieChart', 'incPieLegend', groupByCategory(inc, cur), cur, false, true);
 
   // 支付對象 & 使用對象分析（合併收入+支出）
   var allItems = inc.concat(exp);
@@ -1269,7 +1375,7 @@ function groupByField(list, field, cur) {
   return Object.entries(map).sort(function(a, b) { return b[1] - a[1]; });
 }
 
-function drawPie(cid, lid, data, cur, noIcon) {
+function drawPie(cid, lid, data, cur, noIcon, onClickCat) {
   var cv = document.getElementById(cid);
   var lg = document.getElementById(lid);
   if (!cv || !lg) return;
@@ -1295,13 +1401,17 @@ function drawPie(cid, lid, data, cur, noIcon) {
   var hc = getComputedStyle(document.documentElement).getPropertyValue('--donut-hole').trim();
   ctx.beginPath(); ctx.arc(90, 90, 40, 0, Math.PI * 2);
   ctx.fillStyle = hc; ctx.fill();
+  // onClickCat: 傳入類別名稱時，圖例項目可點擊展開子類別彈窗
+  var clickable = onClickCat === true;
   lg.innerHTML = data.slice(0, 8).map(function(d, i) {
     var amtStr = cur ? fmt(d[1], cur) : '';
     var iconHtml = noIcon ? '' : '<span class="cat-icon">' + getIcon(d[0]) + '</span>';
-    return '<div class="pie-legend-item"><div class="pie-legend-dot" style="background:' +
+    var clickAttr = clickable ? ' onclick="showSubCatPopup(\'' + d[0].replace(/'/g, "\\'") + '\',\'' + (cur || 'TWD') + '\')" style="cursor:pointer"' : '';
+    return '<div class="pie-legend-item"' + clickAttr + '><div class="pie-legend-dot" style="background:' +
       PIE_COLORS[i % PIE_COLORS.length] + '"></div><span>' + iconHtml + d[0] +
       '</span><span style="color:var(--text3);margin-left:auto">' +
-      (amtStr ? amtStr + ' ' : '') + (d[1] / total * 100).toFixed(1) + '%</span></div>';
+      (amtStr ? amtStr + ' ' : '') + (d[1] / total * 100).toFixed(1) + '%</span>' +
+      (clickable ? '<span style="color:var(--text3);font-size:11px;margin-left:4px">▶</span>' : '') + '</div>';
   }).join('');
 }
 
@@ -1316,6 +1426,54 @@ function drawBarChart(eid, data, cur) {
       (mx ? Math.abs(d[1]) / mx * 100 : 0) + '%;background:' +
       PIE_COLORS[i % PIE_COLORS.length] + '"></div></div></div>';
   }).join('') : '<div style="text-align:center;color:var(--text3);padding:20px">無資料</div>';
+}
+
+// ============ 子類別分析彈窗 ============
+function showSubCatPopup(mainCat, cur) {
+  var d = U();
+  var range = document.getElementById('anaRange').value;
+  var month = document.getElementById('anaMonth').value;
+  var year = document.getElementById('anaYear').value;
+  // 合併收入+支出中屬於此大分類的項目
+  var allItems = filterByRange(d.incomes, range, month, year).concat(filterByRange(d.expenses, range, month, year));
+  var items = allItems.filter(function(item) {
+    return (item.category || '').split(' > ')[0] === mainCat;
+  });
+  if (items.length === 0) { showToast('此類別無明細資料', 'warn'); return; }
+
+  // 按子類別分組
+  var map = {};
+  items.forEach(function(item) {
+    var parts = (item.category || '').split(' > ');
+    var subName = parts.length > 1 ? parts[1] : '（無子類別）';
+    map[subName] = (map[subName] || 0) + convert(item.amount, item.currency, cur);
+  });
+  var subData = Object.entries(map).sort(function(a, b) { return b[1] - a[1]; });
+  var total = subData.reduce(function(s, d) { return s + d[1]; }, 0);
+
+  document.getElementById('subCatPopupTitle').innerHTML =
+    '<span class="cat-icon">' + getIcon(mainCat) + '</span> ' + mainCat + ' 子類別分佈';
+
+  // 畫子類別圓餅圖
+  drawPie('subCatPieChart', 'subCatPieLegend', subData, cur, true);
+
+  // 明細列表
+  document.getElementById('subCatPopupList').innerHTML =
+    '<div style="margin-top:8px">' + subData.map(function(s, i) {
+      var pct = total ? (s[1] / total * 100).toFixed(1) : '0.0';
+      return '<div style="display:flex;align-items:center;gap:8px;padding:8px 4px;border-bottom:1px solid var(--border)">' +
+        '<div style="width:10px;height:10px;border-radius:50%;background:' + PIE_COLORS[i % PIE_COLORS.length] + ';flex-shrink:0"></div>' +
+        '<span style="flex:1">' + s[0] + '</span>' +
+        '<span style="color:var(--text3)">' + fmt(s[1], cur) + '</span>' +
+        '<span style="color:var(--text3);font-size:12px;min-width:45px;text-align:right">' + pct + '%</span>' +
+        '</div>';
+    }).join('') + '</div>';
+
+  document.getElementById('subCatPopupOverlay').classList.add('show');
+}
+
+function closeSubCatPopup() {
+  document.getElementById('subCatPopupOverlay').classList.remove('show');
 }
 
 function drawMonthlyChart(cur) {
@@ -1455,6 +1613,23 @@ function openModal(type, editId) {
       '<div class="form-group"><label>備註</label><input type="text" id="f_note" placeholder="例：繳信用卡帳單" value="' + (editing4 ? editing4.note || '' : '') + '"></div>' +
       '<input type="hidden" id="f_editId" value="' + (editId || '') + '">' +
       '<div class="modal-actions"><button class="btn btn-s" onclick="closeModal()">取消</button><button class="btn btn-p" onclick="saveTransfer()">儲存</button></div>';
+  } else if (type === 'receivable') {
+    var isRecv = currentAssetTab !== 'payable';
+    var label = isRecv ? '應收款' : '應付款';
+    var targetLabel = isRecv ? '應付款對象/機構' : '應付款對象/機構';
+    var editing5 = editId ? (d.receivables || []).find(function(r) { return r.id === editId; }) : null;
+    var curOpts5 = Object.entries(CURRENCIES).map(function(entry) {
+      return '<option value="' + entry[0] + '"' + (editing5 && editing5.currency === entry[0] ? ' selected' : '') + '>' + entry[0] + ' ' + entry[1] + '</option>';
+    }).join('');
+    m.innerHTML = '<h3>' + (editing5 ? '編輯' : '新增') + label + '</h3>' +
+      '<div class="form-row"><div class="form-group"><label>建立日期</label><input type="date" id="f_date" value="' + (editing5 ? editing5.date : new Date().toISOString().slice(0, 10)) + '"></div>' +
+      '<div class="form-group"><label>應付日期（到期日）</label><input type="date" id="f_dueDate" value="' + (editing5 ? editing5.dueDate || '' : '') + '"></div></div>' +
+      '<div class="form-group"><label>' + targetLabel + '</label><input type="text" id="f_target" placeholder="例：張先生 / 台電公司" value="' + (editing5 ? editing5.target || '' : '') + '"></div>' +
+      '<div class="form-row"><div class="form-group"><label>金額</label><input type="number" id="f_amt" step="0.01" value="' + (editing5 ? editing5.amount : '') + '"></div>' +
+      '<div class="form-group"><label>幣別</label><select id="f_cur">' + curOpts5 + '</select></div></div>' +
+      '<div class="form-group"><label>備註</label><input type="text" id="f_note" value="' + (editing5 ? editing5.note || '' : '') + '"></div>' +
+      '<input type="hidden" id="f_editId" value="' + (editId || '') + '">' +
+      '<div class="modal-actions"><button class="btn btn-s" onclick="closeModal()">取消</button><button class="btn btn-p" onclick="saveReceivable()">儲存</button></div>';
   }
   document.getElementById('modalOverlay').classList.add('show');
 }

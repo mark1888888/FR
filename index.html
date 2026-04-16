@@ -102,7 +102,8 @@
         <select id="dashCurrency" onchange="renderDashboard()">
           <option value="TWD">TWD</option><option value="USD">USD</option>
           <option value="JPY">JPY</option><option value="EUR">EUR</option>
-          <option value="CNY">CNY</option>
+          <option value="CNY">CNY</option><option value="KRW">KRW</option>
+          <option value="HKD">HKD</option>
         </select>
       </div>
       <div class="stat-grid" id="dashStats"></div>
@@ -138,7 +139,8 @@
         <select id="aasCurrency" onchange="renderAssetAnalysisSection()">
           <option value="TWD">TWD</option><option value="USD">USD</option>
           <option value="JPY">JPY</option><option value="EUR">EUR</option>
-          <option value="CNY">CNY</option>
+          <option value="CNY">CNY</option><option value="KRW">KRW</option>
+          <option value="HKD">HKD</option>
         </select>
       </div>
       <div class="stat-grid" id="aasStats"></div>
@@ -286,6 +288,21 @@
           </table>
         </div>
       </div>
+      <!-- 應收款明細記錄 -->
+      <div id="receivableSection" style="display:none;margin-top:24px">
+        <div class="table-wrap">
+          <div class="table-header" style="display:flex;justify-content:space-between;align-items:center">
+            <h3 id="recvTableTitle">應收款明細</h3>
+            <button class="btn btn-p btn-sm" onclick="openModal('receivable')">+ 新增應收款</button>
+          </div>
+          <div class="table-scroll-wrap">
+            <table>
+              <thead><tr><th>建立日期</th><th>應付日期</th><th>狀態</th><th>對象/機構</th><th>說明</th><th>金額</th><th>幣別</th><th>操作</th></tr></thead>
+              <tbody id="recvTable"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- ==================== 帳戶轉帳 ==================== -->
@@ -323,7 +340,8 @@
         <select id="anaCurrency" onchange="renderAnalysis()">
           <option value="TWD">TWD</option><option value="USD">USD</option>
           <option value="JPY">JPY</option><option value="EUR">EUR</option>
-          <option value="CNY">CNY</option>
+          <option value="CNY">CNY</option><option value="KRW">KRW</option>
+          <option value="HKD">HKD</option>
         </select>
       </div>
       <div class="stat-grid" id="anaStats"></div>
@@ -419,7 +437,8 @@
           <select id="convToCur" onchange="doConvert()">
             <option value="TWD">TWD</option><option value="USD" selected>USD</option>
             <option value="JPY">JPY</option><option value="EUR">EUR</option>
-            <option value="CNY">CNY</option>
+            <option value="CNY">CNY</option><option value="KRW">KRW</option>
+            <option value="HKD">HKD</option>
           </select>
         </div>
         <div class="converter-result" id="convResult">--</div>
@@ -534,6 +553,19 @@
     <h3>選擇圖示</h3>
     <div class="icon-grid" id="iconPickerGrid"></div>
     <div class="modal-actions"><button class="btn btn-s" onclick="closeIconPicker()">取消</button></div>
+  </div>
+</div>
+
+<!-- Sub-Category Popup -->
+<div class="modal-overlay" id="subCatPopupOverlay" onclick="if(event.target===this)closeSubCatPopup()">
+  <div class="modal" style="max-width:420px">
+    <h3 id="subCatPopupTitle"></h3>
+    <div class="pie-chart-wrap" style="margin-bottom:12px">
+      <canvas id="subCatPieChart" width="180" height="180"></canvas>
+      <div class="pie-legend" id="subCatPieLegend"></div>
+    </div>
+    <div id="subCatPopupList" style="max-height:300px;overflow-y:auto"></div>
+    <div class="modal-actions"><button class="btn btn-s" onclick="closeSubCatPopup()">關閉</button></div>
   </div>
 </div>
 
