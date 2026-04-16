@@ -89,17 +89,15 @@ function loadLocal() {
   return false;
 }
 
-// ============ 雲端同步（Bug 1 修正：帶 updated_at 做新舊比對） ============
-var _saveTimer = null;
+// ============ 雲端同步（即時上傳，不再 debounce） ============
 
-/** 儲存（先存本地，再 debounce 存雲端） */
+/** 儲存（先存本地，再立即存雲端） */
 function save() {
   if (DB) {
-    DB.updated_at = new Date().toISOString(); // 每次修改都更新時間戳
+    DB.updated_at = new Date().toISOString();
   }
   saveLocal();
-  if (_saveTimer) clearTimeout(_saveTimer);
-  _saveTimer = setTimeout(function() { cloudSave(); }, 800);
+  cloudSave(); // 每次修改立即上傳
 }
 
 /** 雲端儲存 */
@@ -154,8 +152,66 @@ async function cloudLoad() {
   return false;
 }
 
-/** Bug 1 修正：定期同步檢查（每 30 秒） */
+// ============ 單一裝置登入機制 ============
+var _localSessionId = '';
 var _syncInterval = null;
+var _sessionCheckInterval = null;
+
+/** 產生隨機 session ID */
+function generateSessionId() {
+  return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+}
+
+/** 將 session ID 寫入雲端 */
+async function registerSession() {
+  _localSessionId = generateSessionId();
+  if (DB) {
+    DB._activeSessionId = _localSessionId;
+    DB.updated_at = new Date().toISOString();
+    saveLocal();
+    await cloudSave();
+  }
+}
+
+/** 定期檢查 session 是否仍有效（每 10 秒） */
+function startSessionCheck() {
+  if (_sessionCheckInterval) clearInterval(_sessionCheckInterval);
+  _sessionCheckInterval = setInterval(async function() {
+    if (!currentUserId || !_localSessionId) return;
+    try {
+      var result = await _sb.from('user_data').select('data').eq('user_id', currentUserId).single();
+      if (result.error) return;
+      if (result.data && result.data.data) {
+        var cloudSessionId = result.data.data._activeSessionId || '';
+        if (cloudSessionId && cloudSessionId !== _localSessionId) {
+          // 另一台裝置已登入，強制登出
+          clearInterval(_sessionCheckInterval);
+          if (_syncInterval) clearInterval(_syncInterval);
+          alert('您的帳號已在其他裝置登入，此裝置將自動登出。');
+          forceLogout();
+        }
+      }
+    } catch (e) {
+      // 靜默失敗
+    }
+  }, 10000);
+}
+
+/** 強制登出（不清雲端 session） */
+async function forceLogout() {
+  if (_syncInterval) clearInterval(_syncInterval);
+  if (_sessionCheckInterval) clearInterval(_sessionCheckInterval);
+  _localSessionId = '';
+  await _sb.auth.signOut();
+  currentUser = '';
+  currentUserId = '';
+  DB = null;
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('loginOverlay').style.display = 'flex';
+  showLogin();
+}
+
+/** 定期同步檢查（每 30 秒）+ 重新渲染頁面 */
 function startPeriodicSync() {
   if (_syncInterval) clearInterval(_syncInterval);
   _syncInterval = setInterval(async function() {
@@ -168,53 +224,44 @@ function startPeriodicSync() {
         var cloudTime = cloudData.updated_at || '1970-01-01T00:00:00.000Z';
         var localTime = DB.updated_at || '1970-01-01T00:00:00.000Z';
         if (cloudTime > localTime) {
+          // 保留本地 session ID
+          var mySession = _localSessionId;
           DB = cloudData;
+          DB._activeSessionId = mySession;
           saveLocal();
           showSync('已從雲端同步最新資料 ✓', 'ok');
-          // 重新渲染當前頁面
-          var ap = document.querySelector('.page.active');
-          if (ap) {
-            var pageId = ap.id.replace('page-', '');
-            var renders = {
-              dashboard: renderDashboard,
-              income: renderIncome,
-              expense: renderExpense,
-              assets: renderAssets,
-              analysis: renderAnalysis,
-              assetAnalysis: renderAssetAnalysis,
-              invest: renderInvest
-            };
-            if (renders[pageId]) renders[pageId]();
-          }
+          rerenderActivePage();
         }
       }
     } catch (e) {
-      // 靜默失敗，不干擾使用者
+      // 靜默失敗
     }
   }, 30000);
 }
 
-/** Bug 1 修正：頁面可見性變更時同步 */
+/** 重新渲染當前頁面 */
+function rerenderActivePage() {
+  var ap = document.querySelector('.page.active');
+  if (ap) {
+    var pageId = ap.id.replace('page-', '');
+    var renders = {
+      dashboard: renderDashboard,
+      income: renderIncome,
+      expense: renderExpense,
+      assets: renderAssets,
+      analysis: renderAnalysis,
+      assetAnalysis: renderAssetAnalysis,
+      invest: renderInvest
+    };
+    if (renders[pageId]) renders[pageId]();
+  }
+}
+
+/** 頁面可見性變更時同步 */
 document.addEventListener('visibilitychange', function() {
   if (document.visibilityState === 'visible' && currentUserId && DB) {
-    // 頁面回到前景時，從雲端檢查更新
     cloudLoad().then(function(loaded) {
-      if (loaded) {
-        var ap = document.querySelector('.page.active');
-        if (ap) {
-          var pageId = ap.id.replace('page-', '');
-          var renders = {
-            dashboard: renderDashboard,
-            income: renderIncome,
-            expense: renderExpense,
-            assets: renderAssets,
-            analysis: renderAnalysis,
-            assetAnalysis: renderAssetAnalysis,
-            invest: renderInvest
-          };
-          if (renders[pageId]) renders[pageId]();
-        }
-      }
+      if (loaded) rerenderActivePage();
     });
   }
 });
@@ -286,6 +333,8 @@ async function doLogin() {
     loadLocal();
     var loaded = await cloudLoad();
     if (!loaded && !DB) { initNewUser(); }
+    // 註冊此裝置的 session（強制其他裝置登出）
+    await registerSession();
     enterApp();
   } catch (e) {
     document.getElementById('loginError').style.color = 'var(--red)';
@@ -314,7 +363,7 @@ async function doSetup() {
     currentUserId = result.data.user.id;
     currentUser = result.data.user.email;
     initNewUser();
-    await cloudSave();
+    await registerSession();
     enterApp();
   } catch (e) {
     document.getElementById('registerError').style.color = 'var(--red)';
@@ -347,11 +396,14 @@ function enterApp() {
   fetchRates();
   renderDashboard();
   loadCategories();
-  startPeriodicSync(); // Bug 1: 啟動定期同步
+  startPeriodicSync();
+  startSessionCheck(); // 啟動單一裝置檢查
 }
 
 async function doLogout() {
-  if (_syncInterval) clearInterval(_syncInterval); // 停止定期同步
+  if (_syncInterval) clearInterval(_syncInterval);
+  if (_sessionCheckInterval) clearInterval(_sessionCheckInterval);
+  _localSessionId = '';
   await _sb.auth.signOut();
   currentUser = '';
   currentUserId = '';
@@ -1416,9 +1468,10 @@ document.getElementById('confirmPwd').addEventListener('keydown', function(e) {
   if (session && session.user) {
     currentUserId = session.user.id;
     currentUser = session.user.email;
-    loadLocal(); // 先載入本地
+    loadLocal();
     var loaded = await cloudLoad();
     if (!loaded && !DB) { initNewUser(); }
+    await registerSession(); // 註冊此裝置 session
     enterApp();
   }
 })();
