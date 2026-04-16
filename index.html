@@ -6,6 +6,7 @@
 <title>FlowRich 記帳理財</title>
 <link rel="stylesheet" href="style.css">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 </head>
 <body>
 
@@ -21,7 +22,7 @@
     <input type="email" id="loginUser" placeholder="Email" maxlength="60" autocomplete="email">
     <input type="password" id="loginPwd" placeholder="密碼（至少6位）" maxlength="30" autocomplete="current-password">
     <button class="btn-primary" onclick="doLogin()">登入</button>
-    <button class="btn-secondary" onclick="showRegister()">還沒有帳號？點此註冊</button>
+    <button class="btn-secondary" onclick="showRegister()">遄沒有帳號？點此註冊</button>
   </div>
   <div class="login-box" id="registerView" style="display:none">
     <h1>FlowRich</h1>
@@ -38,7 +39,7 @@
 <!-- ==================== 主應用 ==================== -->
 <div class="app" id="app">
 
-  <!-- 桌面側邊欄 -->
+  <!-- 桌面偶邊欄 -->
   <div class="sidebar">
     <div class="logo">FlowRich</div>
     <div class="user-info" id="sidebarUser"></div>
@@ -141,7 +142,7 @@
           </div>
         </div>
         <div class="chart-container">
-          <h3>幣別分佈</h3>
+          <h3>帳別分佈</h3>
           <div class="pie-chart-wrap">
             <canvas id="aasCurPie" width="180" height="180"></canvas>
             <div class="pie-legend" id="aasCurLegend"></div>
@@ -150,7 +151,7 @@
       </div>
       <div class="dual-grid">
         <div class="chart-container">
-          <h3>負債（信用卡）分佈</h3>
+          <h3>財債（信用卡）分佈</h3>
           <div class="pie-chart-wrap">
             <canvas id="aasDebtPie" width="180" height="180"></canvas>
             <div class="pie-legend" id="aasDebtLegend"></div>
@@ -228,13 +229,14 @@
           <option value="電子支付">電子支付</option>
         </select>
         <button class="btn btn-p" onclick="openModal('expense')">+ 新增支出</button>
+        <button class="btn btn-s" onclick="openBillScanner()">📷 掃描帳單</button>
       </div>
       <div class="stat-grid" id="expStats"></div>
       <div class="table-wrap">
         <div class="table-header"><h3>支出列表</h3></div>
         <div class="table-scroll-wrap">
           <table>
-            <thead><tr><th>日期</th><th>類別</th><th>說明</th><th>支付對象</th><th>使用對象</th><th>金額</th><th>幣別</th><th>支付方式</th><th>帳戶</th><th>操作</th></tr></thead>
+            <thead><tr><th>日期</th><th>類別</th><th>說明</th><th>支付對象</th><th>使用對象</th><th>金額</th><th>帳別</th><th>支付方式</th><th>帳戶</th><th>操作</th></tr></thead>
             <tbody id="expTable"></tbody>
           </table>
         </div>
@@ -394,7 +396,7 @@
       </div>
       <div class="chart-container" style="margin-top:20px">
         <h3>資料管理</h3>
-        <p style="color:var(--text2);font-size:14px;margin-bottom:16px">匯出 JSON 檔案作為備份</p>
+        <p style="color:var(--text2);font-size:14px;margin-bottom:16px">匯出 JSON 檔案作為備仾</p>
         <div class="btn-group">
           <button class="btn btn-p" onclick="exportData()">匯出 JSON</button>
           <button class="btn btn-s" onclick="document.getElementById('importFile').click()">匯入 JSON</button>
@@ -474,6 +476,41 @@
     <h3>選擇圖示</h3>
     <div class="icon-grid" id="iconPickerGrid"></div>
     <div class="modal-actions"><button class="btn btn-s" onclick="closeIconPicker()">取消</button></div>
+  </div>
+</div>
+
+<!-- Bill Scanner Modal -->
+<div class="modal-overlay" id="billScannerOverlay" onclick="if(event.target===this)closeBillScanner()">
+  <div class="modal" style="max-width:600px">
+    <h3>📷 信用卡帳單掃描</h3>
+    <div id="billUploadArea" class="bill-upload-area">
+      <div class="bill-upload-icon">📄</div>
+      <p>點擊或拖曳上傳信用卡帳單圖片</p>
+      <p style="font-size:12px;color:var(--text3)">支援 JPG、PNG 格式</p>
+      <input type="file" id="billFileInput" accept="image/*" style="display:none" onchange="handleBillUpload(event)">
+    </div>
+    <div id="billPreviewArea" style="display:none">
+      <img id="billPreviewImg" style="max-width:100%;border-radius:12px;margin-bottom:16px;border:1px solid var(--border)">
+      <div id="billOcrProgress" style="display:none">
+        <div class="bill-progress-bar"><div class="bill-progress-fill" id="billProgressFill"></div></div>
+        <p id="billOcrStatus" style="text-align:center;font-size:13px;color:var(--text2);margin-top:8px">準備辨識中...</p>
+      </div>
+      <div id="billResultArea" style="display:none">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <h4 style="margin:0">辨識結果</h4>
+          <span id="billResultCount" style="font-size:12px;color:var(--text3)"></span>
+        </div>
+        <div id="billResultList"></div>
+        <div class="modal-actions" style="margin-top:16px">
+          <button class="btn btn-s" onclick="closeBillScanner()">取消</button>
+          <button class="btn btn-s" onclick="resetBillScanner()">重新上傳</button>
+          <button class="btn btn-p" onclick="saveBillExpenses()">全部建檔</button>
+        </div>
+      </div>
+    </div>
+    <div id="billInitActions" class="modal-actions">
+      <button class="btn btn-s" onclick="closeBillScanner()">取消</button>
+    </div>
   </div>
 </div>
 
