@@ -1821,6 +1821,37 @@ function processBillImage(file) {
   reader.readAsDataURL(file);
 }
 
+/** 影像前處理：灰階化 + 對比增強 + 二值化，提升 OCR 辨識率 */
+function _preprocessImage(imageData) {
+  return new Promise(function(resolve) {
+    var img = new Image();
+    img.onload = function() {
+      var cv = document.createElement('canvas');
+      var ctx = cv.getContext('2d');
+      cv.width = img.width;
+      cv.height = img.height;
+      ctx.drawImage(img, 0, 0);
+
+      var imgData = ctx.getImageData(0, 0, cv.width, cv.height);
+      var data = imgData.data;
+
+      for (var i = 0; i < data.length; i += 4) {
+        // 灰階化（加權平均）
+        var gray = data[i] * 0.299 + data[i+1] * 0.587 + data[i+2] * 0.114;
+        // 對比增強（拉伸至 0-255，factor=1.5）
+        gray = ((gray - 128) * 1.5) + 128;
+        gray = Math.max(0, Math.min(255, gray));
+        // 二值化（Otsu 近似：閾值 140）
+        gray = gray > 140 ? 255 : 0;
+        data[i] = data[i+1] = data[i+2] = gray;
+      }
+      ctx.putImageData(imgData, 0, 0);
+      resolve(cv.toDataURL('image/png'));
+    };
+    img.src = imageData;
+  });
+}
+
 async function startBillOCR(imageData) {
   var progressEl = document.getElementById('billOcrProgress');
   var fillEl = document.getElementById('billProgressFill');
@@ -1828,10 +1859,19 @@ async function startBillOCR(imageData) {
   progressEl.style.display = 'block';
 
   try {
+    statusEl.textContent = '正在前處理影像...';
+    fillEl.style.width = '5%';
+
+    // 影像前處理提升辨識品質
+    var processedImage = await _preprocessImage(imageData);
+
     statusEl.textContent = '正在載入 OCR 引擎...';
     fillEl.style.width = '10%';
 
-    var result = await Tesseract.recognize(imageData, 'chi_tra+eng', {
+    var result = await Tesseract.recognize(processedImage, 'chi_tra+eng', {
+      tessedit_pageseg_mode: Tesseract.PSM ? Tesseract.PSM.SINGLE_BLOCK : '6',
+      tessedit_char_whitelist: '',
+      preserve_interword_spaces: '0',
       logger: function(info) {
         if (info.status === 'recognizing text') {
           var pct = Math.round(info.progress * 100);
@@ -1864,6 +1904,71 @@ async function startBillOCR(imageData) {
     fillEl.style.width = '100%';
     fillEl.style.background = 'var(--red)';
   }
+}
+
+/**
+ * OCR 文字清理：移除中文字間空格、修正常見數字誤判、正規化全半形
+ * 在 parseBillText 解析前先呼叫，大幅提升後續日期／金額擷取的準確度
+ */
+function _cleanOcrText(text) {
+  // 1. 全形符號 → 半形
+  text = text.replace(/\u3000/g, ' ').replace(/\t/g, ' ');
+  text = text.replace(/，/g, ',').replace(/。/g, '.').replace(/：/g, ':');
+  text = text.replace(/（/g, '(').replace(/）/g, ')');
+  text = text.replace(/＄/g, '$').replace(/／/g, '/').replace(/－/g, '-');
+  text = text.replace(/０/g,'0').replace(/１/g,'1').replace(/２/g,'2').replace(/３/g,'3')
+             .replace(/４/g,'4').replace(/５/g,'5').replace(/６/g,'6').replace(/７/g,'7')
+             .replace(/８/g,'8').replace(/９/g,'9');
+
+  // 2. 逐行處理
+  var lines = text.split('\n');
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+
+    // 2a. 移除 CJK 字元之間的空格（臺 北 市 → 臺北市）
+    //     反覆執行直到不再變化，處理連續多字間隔
+    var prev;
+    do {
+      prev = line;
+      // CJK 與 CJK 之間的空格
+      line = line.replace(/([\u4e00-\u9fff\u3400-\u4dbf])\s+([\u4e00-\u9fff\u3400-\u4dbf])/g, '$1$2');
+    } while (line !== prev);
+
+    // 2b. 修正數字中插入的空白（6 2 1 0 → 6210, 1 1 5 → 115）
+    //     策略：如果一段文字是由空白隔開的單一數字字元組成，就合併
+    line = line.replace(/(?<!\d)(\d)\s+(?=\d(?:\s+\d)*(?!\d))/g, function(match, p1) {
+      return p1;
+    });
+    // 更強力的處理：連續「單數字+空白」序列合併
+    line = line.replace(/\b(\d)\s+(\d)\s+(\d)\s+(\d)\s+(\d)\s+(\d)\b/g, '$1$2$3$4$5$6');
+    line = line.replace(/\b(\d)\s+(\d)\s+(\d)\s+(\d)\s+(\d)\b/g, '$1$2$3$4$5');
+    line = line.replace(/\b(\d)\s+(\d)\s+(\d)\s+(\d)\b/g, '$1$2$3$4');
+    line = line.replace(/\b(\d)\s+(\d)\s+(\d)\b/g, '$1$2$3');
+    line = line.replace(/\b(\d)\s+(\d)\b/g, '$1$2');
+
+    // 2c. 修正日期格式中被空白切開的斜線（115 / 04 / 13 → 115/04/13）
+    line = line.replace(/(\d)\s*\/\s*(\d)/g, '$1/$2');
+    line = line.replace(/(\d)\s*\-\s*(\d)/g, '$1-$2');
+    line = line.replace(/(\d)\s*\.\s*(\d)/g, '$1.$2');
+
+    // 2d. 常見 OCR 數字誤判修正（僅在「看起來像數字」的上下文中修正）
+    //     日期區段：YYY/MM/DD 或 YYYY/MM/DD 模式中的字母修正
+    line = line.replace(/([0-9])[Oo]([\/\-.])/g, '$10$2');   // 11O/04 → 110/04
+    line = line.replace(/([\/\-.])([Oo])([0-9])/g, '$10$3');  // /O4 → /04
+    line = line.replace(/([0-9])[lI|]([\/\-.])/g, '$11$2');   // 1l5/04 → 115/04
+    line = line.replace(/([\/\-.])([lI|])([0-9])/g, '$11$3');  // /l3 → /13
+    //     金額區段：逗號或小數點附近的字母修正
+    line = line.replace(/([0-9])[Oo]([0-9])/g, '$10$2');      // 62l0 → 6210
+    line = line.replace(/([0-9])[lI|]([0-9])/g, '$11$2');     // 621O → 6210
+    line = line.replace(/[Oo]([,.]?\d{3})/g, '0$1');          // O,210 → 0,210
+    line = line.replace(/(\d{1,3},[0-9])[Oo]([0-9])/g, '$10$2'); // 1,O00 → 1,000
+
+    // 2e. 壓縮多餘空白
+    line = line.replace(/\s+/g, ' ').trim();
+
+    lines[i] = line;
+  }
+  return lines.join('\n');
 }
 
 /** 解析日期字串，回傳 YYYY-MM-DD 或 null */
@@ -1958,8 +2063,8 @@ function _extractAmounts(line) {
  */
 function parseBillText(text) {
   var items = [];
-  // 先做基本清理：全形空白 → 半形，多重空白 → 單一空白
-  text = text.replace(/\u3000/g, ' ').replace(/\t/g, ' ');
+  // OCR 文字深度清理（中文空格、數字修正、全半形正規化）
+  text = _cleanOcrText(text);
   var lines = text.split('\n').map(function(l) { return l.trim(); }).filter(Boolean);
 
   // 跳過行的關鍵字（表頭、合計、頁碼等）
@@ -2025,6 +2130,7 @@ function parseBillText(text) {
 /** 寬鬆解析：只要行中有金額就嘗試擷取 */
 function parseBillTextLoose(text) {
   var items = [];
+  text = _cleanOcrText(text);
   var lines = text.split('\n').map(function(l) { return l.trim(); }).filter(Boolean);
   var today = new Date().toISOString().slice(0, 10);
   var skipRe = /合計|小計|總計|本期|繳款|利息|循環|年利率|帳單|截止|結帳|最低應繳|信用額度|TOTAL|BALANCE|PAYMENT|STATEMENT|PAGE/i;
