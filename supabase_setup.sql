@@ -1,6 +1,6 @@
 -- ============================================
 -- FlowRich Supabase 資料表建立 SQL
--- 請到 Supabase Dashboard > SQL Editor 貼上執行
+-- 請到 Supabase Dashboard > SQL Editor 貴上執行
 -- ============================================
 
 -- 1. 建立 user_data 表：每位使用者一筆 JSON 資料
