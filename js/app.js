@@ -103,6 +103,11 @@ function defaultUserData() {
     portfolio: [],       // 投資組合 { id, type:'stock'|'fund'|'other', code, name, costPerUnit, units, currency, note }
     properties: [],      // 不動產 { id, subType, name, address, purchaseDate, purchasePrice, currentValue, currency, note }
     vehicles: [],        // 動產   { id, subType, name, brand, model, purchaseDate, purchasePrice, currentValue, currency, note }
+    // v1.8.6 財務規劃模組
+    projects: [],        // 專案標籤 { id, name, emoji, color, status:'active'|'closed', startDate, endDate, budget, currency, note }
+    recurring: [],       // 定期收/支 { id, type:'income'|'expense', name, amount, currency, category, accountId, dayOfMonth, note, active, lastGenerated:'YYYY-MM' }
+    savingsGoals: [],    // 儲蓄目標 { id, name, emoji, targetAmount, currency, deadline, startDate, monthlyTarget, note, status:'active'|'done' }
+    taxProfile: null,    // 稅務設定 { annualIncome, deductions, dividendIncome, filingStatus }
     updated_at: new Date().toISOString()
   };
 }
@@ -309,7 +314,8 @@ function rerenderActivePage() {
       expense: renderExpense,
       assets: renderAssets,
       analysis: renderAnalysis,
-      invest: renderInvest
+      invest: renderInvest,
+      planning: renderPlanning
     };
     if (renders[pageId]) renders[pageId]();
   }
@@ -379,6 +385,9 @@ function U() {
   if (!DB.transfers) DB.transfers = [];
   if (!DB.receivables) DB.receivables = [];
   if (!DB.portfolio) DB.portfolio = [];
+  if (!DB.projects) DB.projects = [];
+  if (!DB.recurring) DB.recurring = [];
+  if (!DB.savingsGoals) DB.savingsGoals = [];
   if (!DB.updated_at) DB.updated_at = new Date().toISOString();
   if (!_legacyMigrated) {
     _legacyMigrated = true;
@@ -661,7 +670,8 @@ function switchPage(page) {
     assets: renderAssets,
     transfer: renderTransfer,
     analysis: renderAnalysis,
-    invest: renderInvest
+    invest: renderInvest,
+    planning: renderPlanning
   };
   if (renders[page]) renders[page]();
 }
@@ -714,6 +724,18 @@ function renderHealthCards(v) {
         '<div class="sub">銀行 ' + fmt(v.bankAmt, v.cur) + ' + 現金 ' + fmt(v.cashAmt, v.cur) + ' + 投資 ' + fmt(v.investAmt, v.cur) + '</div></div>';
   }
 
+  // 生存天數卡：不增加收入的情況下還能撐幾天
+  var survivalCard = '';
+  if (v.cur) {
+    var sv = computeSurvivalDays(v.cur);
+    var daysStr = isFinite(sv.days) ? Math.floor(sv.days) + ' 天' : '∞ 無近 3 月支出';
+    var svLv = isFinite(sv.days) ? _healthLevel(sv.days, [180, 90], true) : { cls: 'c-green', tip: '健康', icon: '✓' };
+    survivalCard =
+      '<div class="stat-card"><div class="label">生存天數</div>' +
+        '<div class="value ' + svLv.cls + '">' + daysStr + ' <span style="font-size:14px">' + svLv.icon + '</span></div>' +
+        '<div class="sub">快速支配 ÷ 近 3 月平均月支出｜標準 ≥ 180 天｜' + svLv.tip + '</div></div>';
+  }
+
   return (
     '<div class="stat-card"><div class="label">負債比率</div>' +
       '<div class="value ' + dLv.cls + '">' + debtRatioStr + ' <span style="font-size:14px">' + dLv.icon + '</span></div>' +
@@ -724,7 +746,8 @@ function renderHealthCards(v) {
     '<div class="stat-card"><div class="label">緊急預備金</div>' +
       '<div class="value ' + eLv.cls + '">' + emStr + ' <span style="font-size:14px">' + eLv.icon + '</span></div>' +
       '<div class="sub">流動資產 ÷ 本月支出｜標準 3–6 個月｜' + eLv.tip + '</div></div>' +
-    qdCard
+    qdCard +
+    survivalCard
   );
 }
 
@@ -2307,6 +2330,402 @@ function drawMonthlyChart(cur) {
   });
 }
 
+// ============ 財務規劃 (v1.8.6) ============
+var _currentPlanTab = 'projects';
+
+function renderPlanning() {
+  _renderPlanTab(_currentPlanTab);
+}
+
+function switchPlanTab(tab, btn) {
+  _currentPlanTab = tab;
+  document.querySelectorAll('#page-planning .tab-btn').forEach(function(b) { b.classList.remove('active'); });
+  if (btn) btn.classList.add('active');
+  _renderPlanTab(tab);
+}
+
+function _renderPlanTab(tab) {
+  if (tab === 'projects') renderPlanProjects();
+  else if (tab === 'recurring') renderPlanRecurring();
+  else if (tab === 'goals') renderPlanGoals();
+  else if (tab === 'tax') renderPlanTax();
+}
+
+// ============ B. 專案標籤 ============
+function renderPlanProjects() {
+  var d = U();
+  var projects = d.projects || [];
+  // 計算每個專案的總收支
+  function aggregate(pid) {
+    var income = (d.incomes || []).filter(function(i) { return i.projectId === pid; })
+      .reduce(function(s, i) { return s + convert(i.amount, i.currency, 'TWD'); }, 0);
+    var expense = (d.expenses || []).filter(function(e) { return e.projectId === pid; })
+      .reduce(function(s, e) { return s + convert(e.amount, e.currency, 'TWD'); }, 0);
+    var count = (d.incomes || []).filter(function(i) { return i.projectId === pid; }).length +
+                (d.expenses || []).filter(function(e) { return e.projectId === pid; }).length;
+    return { income: income, expense: expense, net: income - expense, count: count };
+  }
+
+  var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">' +
+    '<div style="color:var(--text2);font-size:13px">專案標籤可將跨月、跨類別的收支（例如裝修、旅遊、備孕計畫）匯聚起來計算總損益。</div>' +
+    '<button class="btn btn-p btn-sm" onclick="openModal(\'planProject\')">+ 新增專案</button></div>';
+
+  if (projects.length === 0) {
+    html += '<div style="text-align:center;color:var(--text3);padding:60px">尚無專案，點擊右上「新增專案」建立第一個。</div>';
+  } else {
+    html += '<div class="stat-grid">' + projects.map(function(p) {
+      var agg = aggregate(p.id);
+      var pct = p.budget > 0 ? Math.min(100, (agg.expense / convert(p.budget, p.currency || 'TWD', 'TWD')) * 100) : 0;
+      var color = agg.net >= 0 ? 'c-green' : 'c-red';
+      var statusTag = p.status === 'closed' ? '<span class="tag tag-blue" style="margin-left:6px">已結案</span>' : '';
+      return '<div class="stat-card" style="cursor:pointer" onclick="editPlanProject(\'' + p.id + '\')">' +
+        '<div class="label">' + (p.emoji || '📁') + ' ' + p.name + statusTag + '</div>' +
+        '<div class="value ' + color + '">' + (agg.net >= 0 ? '+' : '') + fmt(agg.net, 'TWD') + '</div>' +
+        '<div class="sub">收 ' + fmt(agg.income, 'TWD') + '｜支 ' + fmt(agg.expense, 'TWD') + '｜' + agg.count + ' 筆</div>' +
+        (p.budget > 0 ? '<div style="margin-top:8px;background:var(--border);border-radius:4px;height:6px;overflow:hidden"><div style="height:100%;background:' + (pct > 100 ? '#ef4444' : 'var(--primary)') + ';width:' + pct + '%"></div></div><div style="font-size:11px;color:var(--text3);margin-top:4px">預算 ' + fmt(p.budget, p.currency || 'TWD') + '｜已用 ' + pct.toFixed(0) + '%</div>' : '') +
+        '</div>';
+    }).join('') + '</div>';
+  }
+  document.getElementById('planContent').innerHTML = html;
+}
+
+function editPlanProject(id) { openModal('planProject', id); }
+
+function savePlanProject() {
+  var d = U();
+  var editId = document.getElementById('f_editId').value;
+  var obj = {
+    id: editId || genId(),
+    name: document.getElementById('f_pjName').value.trim(),
+    emoji: document.getElementById('f_pjEmoji').value.trim() || '📁',
+    status: document.getElementById('f_pjStatus').value,
+    startDate: document.getElementById('f_pjStart').value,
+    endDate: document.getElementById('f_pjEnd').value,
+    budget: parseFloat(document.getElementById('f_pjBudget').value) || 0,
+    currency: document.getElementById('f_pjCur').value,
+    note: document.getElementById('f_pjNote').value
+  };
+  if (!obj.name) { alert('請輸入專案名稱'); return; }
+  if (editId) {
+    var idx = d.projects.findIndex(function(p) { return p.id === editId; });
+    if (idx >= 0) d.projects[idx] = obj;
+  } else {
+    d.projects.push(obj);
+  }
+  save(); closeModal(); renderPlanProjects();
+}
+
+function deletePlanProject(id) {
+  showConfirmModal('確定刪除此專案？不會刪除相關收支紀錄，只是把它們的專案標籤清掉。', function() {
+    var d = U();
+    d.projects = d.projects.filter(function(p) { return p.id !== id; });
+    (d.incomes || []).forEach(function(i) { if (i.projectId === id) delete i.projectId; });
+    (d.expenses || []).forEach(function(e) { if (e.projectId === id) delete e.projectId; });
+    save(); closeModal(); renderPlanProjects();
+  });
+}
+
+// ============ C. 定期收支 + 生存天數 ============
+function renderPlanRecurring() {
+  var d = U();
+  var list = d.recurring || [];
+  var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">' +
+    '<div style="color:var(--text2);font-size:13px">設定每月固定收入/支出（如薪資、保費、房貸、訂閱），系統會在每月 1 號自動建立「預計」記錄。</div>' +
+    '<button class="btn btn-p btn-sm" onclick="openModal(\'planRecurring\')">+ 新增定期項目</button></div>';
+
+  // 本月自動產生狀態
+  var thisMonth = new Date().toISOString().slice(0, 7);
+  var pendingCount = list.filter(function(r) { return r.active && r.lastGenerated !== thisMonth; }).length;
+  if (pendingCount > 0) {
+    html += '<div style="background:rgba(108,99,255,.1);border:1px solid var(--primary);border-radius:12px;padding:12px;margin-bottom:16px;font-size:13px">' +
+      '本月還有 ' + pendingCount + ' 筆定期項目尚未建立記錄。<button class="btn btn-p btn-sm" style="margin-left:12px" onclick="runRecurringThisMonth()">立即產生本月</button></div>';
+  }
+
+  if (list.length === 0) {
+    html += '<div style="text-align:center;color:var(--text3);padding:60px">尚無定期項目。</div>';
+  } else {
+    html += '<div class="table-wrap"><div class="table-scroll-wrap"><table>' +
+      '<thead><tr><th>類型</th><th>名稱</th><th>分類</th><th>金額</th><th>扣款日</th><th>帳戶</th><th>本月狀態</th><th>操作</th></tr></thead>' +
+      '<tbody>' +
+      list.map(function(r) {
+        var acct = d.accounts.find(function(a) { return a.id === r.accountId; });
+        var isDone = r.lastGenerated === thisMonth;
+        var typeLabel = r.type === 'income' ? '<span class="tag tag-green">收入</span>' : '<span class="tag tag-red">支出</span>';
+        return '<tr style="' + (r.active ? '' : 'opacity:.5') + '">' +
+          '<td>' + typeLabel + '</td>' +
+          '<td style="font-weight:600">' + r.name + '</td>' +
+          '<td>' + (r.category || '-') + '</td>' +
+          '<td>' + fmt(r.amount, r.currency) + '</td>' +
+          '<td>每月 ' + r.dayOfMonth + ' 日</td>' +
+          '<td>' + (acct ? acct.name : '-') + '</td>' +
+          '<td>' + (isDone ? '<span class="tag tag-green">已建</span>' : (r.active ? '<span class="tag tag-orange">待建</span>' : '<span class="tag">停用</span>')) + '</td>' +
+          '<td><span class="edit-btn" onclick="editPlanRecurring(\'' + r.id + '\')">✏️</span>' +
+            '<span class="del-btn" onclick="deletePlanRecurring(\'' + r.id + '\')">✕</span></td></tr>';
+      }).join('') +
+      '</tbody></table></div></div>';
+  }
+
+  document.getElementById('planContent').innerHTML = html;
+}
+
+function runRecurringThisMonth() {
+  var d = U();
+  var thisMonth = new Date().toISOString().slice(0, 7);
+  var today = new Date().toISOString().slice(0, 10);
+  var created = 0;
+  (d.recurring || []).forEach(function(r) {
+    if (!r.active || r.lastGenerated === thisMonth) return;
+    var dateStr = thisMonth + '-' + String(r.dayOfMonth || 1).padStart(2, '0');
+    var record = {
+      id: genId(),
+      date: dateStr,
+      category: r.category || (r.type === 'income' ? '其他收入' : '其他支出'),
+      accountId: r.accountId || '',
+      amount: r.amount,
+      currency: r.currency,
+      note: '[定期] ' + r.name + (r.note ? '｜' + r.note : ''),
+      payTo: '', usedBy: '',
+      _fromRecurringId: r.id
+    };
+    if (r.type === 'income') {
+      d.incomes.push(record);
+      var ac = d.accounts.find(function(a) { return a.id === r.accountId; });
+      if (ac) ac.balance += convert(r.amount, r.currency, ac.currency);
+    } else {
+      record.payMethod = '銀行轉帳';
+      record.transferAccount = '';
+      d.expenses.push(record);
+      var ac2 = d.accounts.find(function(a) { return a.id === r.accountId; });
+      if (ac2) ac2.balance -= convert(r.amount, r.currency, ac2.currency);
+    }
+    r.lastGenerated = thisMonth;
+    created++;
+  });
+  save();
+  renderPlanRecurring();
+  showToast('已建立 ' + created + ' 筆本月定期記錄');
+}
+
+function editPlanRecurring(id) { openModal('planRecurring', id); }
+
+function savePlanRecurring() {
+  var d = U();
+  var editId = document.getElementById('f_editId').value;
+  var obj = {
+    id: editId || genId(),
+    type: document.getElementById('f_rType').value,
+    name: document.getElementById('f_rName').value.trim(),
+    amount: parseFloat(document.getElementById('f_rAmt').value) || 0,
+    currency: document.getElementById('f_rCur').value,
+    category: document.getElementById('f_rCat').value,
+    accountId: document.getElementById('f_rAcct').value,
+    dayOfMonth: parseInt(document.getElementById('f_rDay').value, 10) || 1,
+    note: document.getElementById('f_rNote').value,
+    active: document.getElementById('f_rActive').checked,
+    lastGenerated: ''
+  };
+  if (!obj.name) { alert('請輸入名稱'); return; }
+  if (!obj.amount) { alert('請輸入金額'); return; }
+  if (editId) {
+    var idx = d.recurring.findIndex(function(r) { return r.id === editId; });
+    if (idx >= 0) {
+      obj.lastGenerated = d.recurring[idx].lastGenerated || '';
+      d.recurring[idx] = obj;
+    }
+  } else {
+    d.recurring.push(obj);
+  }
+  save(); closeModal(); renderPlanRecurring();
+}
+
+function deletePlanRecurring(id) {
+  showConfirmModal('確定刪除此定期項目？已建立的收支記錄不會受影響。', function() {
+    var d = U();
+    d.recurring = d.recurring.filter(function(r) { return r.id !== id; });
+    save(); closeModal(); renderPlanRecurring();
+  });
+}
+
+/** 計算生存天數 = 快速支配資產 / 近 3 月平均月支出 × 30 */
+function computeSurvivalDays(cur) {
+  var d = U();
+  // 快速支配資產
+  var bankAmt = d.accounts.filter(function(a) { return a.type === 'bank'; })
+    .reduce(function(s, a) { return s + convert(a.balance, a.currency, cur); }, 0);
+  var cashAmt = d.accounts.filter(function(a) { return a.type === 'cash'; })
+    .reduce(function(s, a) { return s + convert(a.balance, a.currency, cur); }, 0);
+  var investAmt = portfolioMarketValue(cur);
+  var quickDisposable = bankAmt + cashAmt + investAmt;
+
+  // 近 3 個月平均支出（不含當月）
+  var now = new Date();
+  var months = [];
+  for (var i = 1; i <= 3; i++) {
+    var dt = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    months.push(dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0'));
+  }
+  var monthlyExp = (d.expenses || []).filter(function(e) {
+    return months.indexOf((e.date || '').slice(0, 7)) >= 0;
+  }).reduce(function(s, e) { return s + convert(e.amount, e.currency, cur); }, 0);
+  var avgMonthly = monthlyExp / 3;
+  var days = avgMonthly > 0 ? (quickDisposable / avgMonthly) * 30 : Infinity;
+  return { quickDisposable: quickDisposable, avgMonthly: avgMonthly, days: days };
+}
+
+// ============ D. 儲蓄目標 ============
+function renderPlanGoals() {
+  var d = U();
+  var goals = d.savingsGoals || [];
+  // 可用於分配的月結餘（用本月 saving 估計）
+  var now = new Date(), thisMonth = now.toISOString().slice(0, 7);
+  var tI = (d.incomes || []).filter(function(i) { return (i.date || '').slice(0, 7) === thisMonth; })
+    .reduce(function(s, i) { return s + convert(i.amount, i.currency, 'TWD'); }, 0);
+  var tE = (d.expenses || []).filter(function(e) { return (e.date || '').slice(0, 7) === thisMonth; })
+    .reduce(function(s, e) { return s + convert(e.amount, e.currency, 'TWD'); }, 0);
+  var monthSaving = tI - tE;
+
+  var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">' +
+    '<div style="color:var(--text2);font-size:13px">設定買車、旅遊等大筆目標，系統根據每月結餘（本月 ' + fmt(monthSaving, 'TWD') + '）預估達成時間。</div>' +
+    '<button class="btn btn-p btn-sm" onclick="openModal(\'planGoal\')">+ 新增目標</button></div>';
+
+  if (goals.length === 0) {
+    html += '<div style="text-align:center;color:var(--text3);padding:60px">尚無目標。</div>';
+  } else {
+    html += '<div class="stat-grid">' + goals.map(function(g) {
+      // 進度用「專案累積」或「淨儲蓄」來算，這裡簡化為 monthSaving 基準
+      var target = convert(g.targetAmount, g.currency || 'TWD', 'TWD');
+      var saved = 0;
+      // 若綁專案，取該專案累計淨收入為已儲蓄；否則顯示「需每月 ?」
+      if (g.projectId) {
+        var inc = (d.incomes || []).filter(function(i) { return i.projectId === g.projectId; })
+          .reduce(function(s, i) { return s + convert(i.amount, i.currency, 'TWD'); }, 0);
+        var exp = (d.expenses || []).filter(function(e) { return e.projectId === g.projectId; })
+          .reduce(function(s, e) { return s + convert(e.amount, e.currency, 'TWD'); }, 0);
+        saved = inc - exp;
+      }
+      var pct = target > 0 ? Math.min(100, Math.max(0, (saved / target) * 100)) : 0;
+      var remaining = Math.max(0, target - saved);
+      var monthsNeeded = monthSaving > 0 ? Math.ceil(remaining / monthSaving) : null;
+      var deadline = g.deadline ? new Date(g.deadline) : null;
+      var monthsUntilDeadline = deadline ? Math.max(0, Math.ceil((deadline - now) / (1000 * 60 * 60 * 24 * 30))) : null;
+      var warn = (monthsUntilDeadline !== null && monthsNeeded !== null && monthsNeeded > monthsUntilDeadline);
+
+      return '<div class="stat-card" style="cursor:pointer" onclick="editPlanGoal(\'' + g.id + '\')">' +
+        '<div class="label">' + (g.emoji || '🎯') + ' ' + g.name + '</div>' +
+        '<div class="value c-primary">' + fmt(saved, 'TWD') + ' / ' + fmt(target, 'TWD') + '</div>' +
+        '<div style="margin-top:8px;background:var(--border);border-radius:4px;height:8px;overflow:hidden"><div style="height:100%;background:' + (warn ? '#ef4444' : 'var(--primary)') + ';width:' + pct + '%"></div></div>' +
+        '<div class="sub" style="margin-top:6px">' +
+          pct.toFixed(1) + '% 已達成' +
+          (g.deadline ? '｜' + g.deadline : '') +
+          (monthsNeeded !== null ? '｜按本月結餘需 ' + monthsNeeded + ' 個月' : '') +
+          (warn ? '<br><span class="c-red">⚠ 預估達不到期限</span>' : '') +
+        '</div></div>';
+    }).join('') + '</div>';
+  }
+  document.getElementById('planContent').innerHTML = html;
+}
+
+function editPlanGoal(id) { openModal('planGoal', id); }
+
+function savePlanGoal() {
+  var d = U();
+  var editId = document.getElementById('f_editId').value;
+  var obj = {
+    id: editId || genId(),
+    name: document.getElementById('f_gName').value.trim(),
+    emoji: document.getElementById('f_gEmoji').value.trim() || '🎯',
+    targetAmount: parseFloat(document.getElementById('f_gTarget').value) || 0,
+    currency: document.getElementById('f_gCur').value,
+    deadline: document.getElementById('f_gDeadline').value,
+    projectId: document.getElementById('f_gProject').value,
+    note: document.getElementById('f_gNote').value,
+    status: 'active'
+  };
+  if (!obj.name) { alert('請輸入目標名稱'); return; }
+  if (!obj.targetAmount) { alert('請輸入目標金額'); return; }
+  if (editId) {
+    var idx = d.savingsGoals.findIndex(function(g) { return g.id === editId; });
+    if (idx >= 0) d.savingsGoals[idx] = obj;
+  } else {
+    d.savingsGoals.push(obj);
+  }
+  save(); closeModal(); renderPlanGoals();
+}
+
+function deletePlanGoal(id) {
+  showConfirmModal('確定刪除此目標？', function() {
+    var d = U();
+    d.savingsGoals = d.savingsGoals.filter(function(g) { return g.id !== id; });
+    save(); closeModal(); renderPlanGoals();
+  });
+}
+
+// ============ E. 稅務預估（台灣綜合所得稅 2025 稅率，簡化版） ============
+// 稅率級距（2025 年度，單位 TWD）
+var TW_TAX_BRACKETS = [
+  { limit: 590000,    rate: 0.05, deduct: 0 },
+  { limit: 1330000,   rate: 0.12, deduct: 41300 },
+  { limit: 2660000,   rate: 0.20, deduct: 147700 },
+  { limit: 4980000,   rate: 0.30, deduct: 413700 },
+  { limit: Infinity,  rate: 0.40, deduct: 911700 }
+];
+var TW_TAX_BASE_DEDUCTION = 97000;    // 免稅額（單身）
+var TW_TAX_STANDARD_DEDUCTION = 131000; // 標準扣除額
+var TW_TAX_SALARY_DEDUCTION = 218000;   // 薪資所得特別扣除額
+
+function estimateTaiwanTax(grossIncome, salaryIncome, extraDeductions) {
+  extraDeductions = extraDeductions || 0;
+  var taxable = grossIncome - TW_TAX_BASE_DEDUCTION - TW_TAX_STANDARD_DEDUCTION - Math.min(salaryIncome, TW_TAX_SALARY_DEDUCTION) - extraDeductions;
+  if (taxable <= 0) return { taxable: 0, tax: 0, bracket: null, effectiveRate: 0 };
+  var bracket = TW_TAX_BRACKETS.find(function(b) { return taxable <= b.limit; });
+  var tax = Math.max(0, taxable * bracket.rate - bracket.deduct);
+  return { taxable: taxable, tax: tax, bracket: bracket, effectiveRate: tax / grossIncome };
+}
+
+function renderPlanTax() {
+  var d = U();
+  var year = new Date().getFullYear().toString();
+  var yearInc = (d.incomes || []).filter(function(i) { return (i.date || '').slice(0, 4) === year; });
+  // 以「薪資」類別為主要薪資所得
+  var salaryInc = yearInc.filter(function(i) { return i.category === '薪資'; })
+    .reduce(function(s, i) { return s + convert(i.amount, i.currency, 'TWD'); }, 0);
+  var otherInc = yearInc.filter(function(i) { return i.category !== '薪資'; })
+    .reduce(function(s, i) { return s + convert(i.amount, i.currency, 'TWD'); }, 0);
+  var grossInc = salaryInc + otherInc;
+  // 投資股息（簡化：投資收益類別）
+  var dividend = yearInc.filter(function(i) { return i.category === '投資收益'; })
+    .reduce(function(s, i) { return s + convert(i.amount, i.currency, 'TWD'); }, 0);
+
+  var est = estimateTaiwanTax(grossInc, salaryInc, 0);
+  var monthlyReserve = est.tax / 12;
+
+  var html = '<div style="background:rgba(108,99,255,.05);border-left:3px solid var(--primary);padding:12px;margin-bottom:16px;font-size:13px;color:var(--text2)">' +
+    '台灣綜合所得稅簡易試算（' + year + ' 年度）。採用標準扣除額 + 薪資所得特別扣除額，僅供估算；實際申報請以財政部公布稅率為準。</div>';
+
+  html += '<div class="stat-grid">' +
+    '<div class="stat-card"><div class="label">今年累計收入</div><div class="value c-green">' + fmt(grossInc, 'TWD') + '</div><div class="sub">薪資 ' + fmt(salaryInc, 'TWD') + '｜其他 ' + fmt(otherInc, 'TWD') + '</div></div>' +
+    '<div class="stat-card"><div class="label">課稅所得淨額</div><div class="value c-blue">' + fmt(est.taxable, 'TWD') + '</div><div class="sub">扣除免稅 + 標扣 + 薪扣</div></div>' +
+    '<div class="stat-card"><div class="label">預估年稅額</div><div class="value c-red">' + fmt(est.tax, 'TWD') + '</div><div class="sub">稅率 ' + (est.bracket ? (est.bracket.rate * 100).toFixed(0) + '%' : '0%') + '｜有效 ' + (est.effectiveRate * 100).toFixed(2) + '%</div></div>' +
+    '<div class="stat-card"><div class="label">每月建議預備金</div><div class="value c-orange">' + fmt(monthlyReserve, 'TWD') + '</div><div class="sub">年稅額 ÷ 12</div></div>' +
+    '</div>';
+
+  // 稅率級距表
+  html += '<h3 style="margin-top:24px">2025 年度稅率級距</h3>' +
+    '<div class="table-wrap"><div class="table-scroll-wrap"><table>' +
+    '<thead><tr><th>課稅所得淨額</th><th>稅率</th><th>累進差額</th></tr></thead><tbody>' +
+    '<tr><td>0 – 590,000</td><td>5%</td><td>0</td></tr>' +
+    '<tr><td>590,001 – 1,330,000</td><td>12%</td><td>41,300</td></tr>' +
+    '<tr><td>1,330,001 – 2,660,000</td><td>20%</td><td>147,700</td></tr>' +
+    '<tr><td>2,660,001 – 4,980,000</td><td>30%</td><td>413,700</td></tr>' +
+    '<tr><td>4,980,001 以上</td><td>40%</td><td>911,700</td></tr>' +
+    '</tbody></table></div></div>';
+
+  html += '<div style="margin-top:16px;font-size:13px;color:var(--text3)">' +
+    '📌 提示：目前以收入頁的「薪資」類別視為薪資所得，「投資收益」視為股息（' + fmt(dividend, 'TWD') + '）。實際申報還需考量扶養親屬、保險費、醫療費等列舉扣除。</div>';
+
+  document.getElementById('planContent').innerHTML = html;
+}
+
 // ============ 匯率換算 ============
 function doConvert() {
   var amt = parseFloat(document.getElementById('convFrom').value) || 0;
@@ -2315,6 +2734,16 @@ function doConvert() {
   var result = convert(amt, from, to);
   document.getElementById('convTo').value = result.toFixed(to === 'JPY' ? 0 : 2);
   document.getElementById('convResult').textContent = fmt(amt, from) + ' = ' + fmt(result, to);
+}
+
+/** 建構專案下拉選項 HTML（含「不歸屬」選項） */
+function _buildProjectOptions(selectedId) {
+  var d = U();
+  var opts = '<option value="">（不歸屬專案）</option>';
+  opts += (d.projects || []).filter(function(p) { return p.status !== 'closed'; }).map(function(p) {
+    return '<option value="' + p.id + '"' + (selectedId === p.id ? ' selected' : '') + '>' + (p.emoji || '📁') + ' ' + p.name + '</option>';
+  }).join('');
+  return opts;
 }
 
 // ============ 模態對話框 ============
@@ -2337,6 +2766,7 @@ function openModal(type, editId) {
       '<div class="form-group"><label>帳戶</label><select id="f_acct">' + acctOpts + '</select></div></div>' +
       '<div class="form-row"><div class="form-group"><label>金額</label><input type="number" id="f_amt" step="0.01" value="' + (editing ? editing.amount : '') + '"></div>' +
       '<div class="form-group"><label>幣別</label><select id="f_cur">' + curOpts + '</select></div></div>' +
+      '<div class="form-group"><label>專案標籤</label><select id="f_project">' + _buildProjectOptions(editing ? editing.projectId : '') + '</select></div>' +
       '<div class="form-group"><label>備註</label><input type="text" id="f_note" value="' + (editing ? editing.note || '' : '') + '"></div>' +
       '<div class="form-row"><div class="form-group"><label>支付對象</label><input type="text" id="f_payTo" placeholder="例：新民小學" value="' + (editing ? editing.payTo || '' : '') + '"></div>' +
       '<div class="form-group"><label>使用對象</label><input type="text" id="f_usedBy" placeholder="例：女兒" value="' + (editing ? editing.usedBy || '' : '') + '"></div></div>' +
@@ -2363,6 +2793,7 @@ function openModal(type, editId) {
       '<div class="form-group"><label>幣別</label><select id="f_cur">' + curOpts2 + '</select></div></div>' +
       '<div class="form-group"><label>帳戶</label><select id="f_acct">' + acctOpts2 + '</select></div>' +
       '<div class="form-group" id="transferAcctGroup" style="display:' + (showTransferAcct ? 'block' : 'none') + '"><label>轉入帳號</label><input type="text" id="f_transferAcct" placeholder="例：012-345678901234" value="' + (editing2 ? editing2.transferAccount || '' : '') + '"></div>' +
+      '<div class="form-group"><label>專案標籤</label><select id="f_project">' + _buildProjectOptions(editing2 ? editing2.projectId : '') + '</select></div>' +
       '<div class="form-group"><label>備註</label><input type="text" id="f_note" value="' + (editing2 ? editing2.note || '' : '') + '"></div>' +
       '<div class="form-row"><div class="form-group"><label>支付對象</label><input type="text" id="f_payTo" placeholder="例：新民小學" value="' + (editing2 ? editing2.payTo || '' : '') + '"></div>' +
       '<div class="form-group"><label>使用對象</label><input type="text" id="f_usedBy" placeholder="例：女兒" value="' + (editing2 ? editing2.usedBy || '' : '') + '"></div></div>' +
@@ -2493,8 +2924,95 @@ function openModal(type, editId) {
       '<div class="form-group"><label>備註</label><input type="text" id="f_vehNote" value="' + (editingV ? editingV.note || '' : '') + '"></div>' +
       '<input type="hidden" id="f_editId" value="' + (editId || '') + '">' +
       '<div class="modal-actions"><button class="btn btn-s" onclick="closeModal()">取消</button><button class="btn btn-p" onclick="saveVehicle()">儲存</button></div>';
+  } else if (type === 'planProject') {
+    var editingPj = editId ? (d.projects || []).find(function(p) { return p.id === editId; }) : null;
+    var curOptsPj = Object.entries(CURRENCIES).map(function(entry) {
+      return '<option value="' + entry[0] + '"' + (editingPj && editingPj.currency === entry[0] ? ' selected' : '') + '>' + entry[0] + ' ' + entry[1] + '</option>';
+    }).join('');
+    m.innerHTML = '<h3>' + (editingPj ? '編輯' : '新增') + '專案標籤</h3>' +
+      '<div class="form-row"><div class="form-group"><label>Emoji</label><input type="text" id="f_pjEmoji" maxlength="2" placeholder="📁" value="' + (editingPj ? editingPj.emoji || '📁' : '📁') + '"></div>' +
+      '<div class="form-group" style="flex:3"><label>名稱</label><input type="text" id="f_pjName" placeholder="如：裝修新房、京都旅行" value="' + (editingPj ? editingPj.name || '' : '') + '"></div></div>' +
+      '<div class="form-row"><div class="form-group"><label>開始日期</label><input type="date" id="f_pjStart" value="' + (editingPj ? editingPj.startDate || '' : new Date().toISOString().slice(0, 10)) + '"></div>' +
+      '<div class="form-group"><label>結束日期</label><input type="date" id="f_pjEnd" value="' + (editingPj ? editingPj.endDate || '' : '') + '"></div></div>' +
+      '<div class="form-row"><div class="form-group"><label>預算金額</label><input type="number" id="f_pjBudget" step="1" value="' + (editingPj ? editingPj.budget || '' : '') + '"></div>' +
+      '<div class="form-group"><label>幣別</label><select id="f_pjCur">' + curOptsPj + '</select></div></div>' +
+      '<div class="form-group"><label>狀態</label><select id="f_pjStatus">' +
+        '<option value="active"' + (editingPj && editingPj.status === 'active' ? ' selected' : '') + '>進行中</option>' +
+        '<option value="closed"' + (editingPj && editingPj.status === 'closed' ? ' selected' : '') + '>已結案</option>' +
+      '</select></div>' +
+      '<div class="form-group"><label>備註</label><input type="text" id="f_pjNote" value="' + (editingPj ? editingPj.note || '' : '') + '"></div>' +
+      '<input type="hidden" id="f_editId" value="' + (editId || '') + '">' +
+      '<div class="modal-actions">' +
+        (editingPj ? '<button class="btn btn-s" style="color:var(--red)" onclick="deletePlanProject(\'' + editingPj.id + '\')">刪除</button>' : '') +
+        '<button class="btn btn-s" onclick="closeModal()">取消</button>' +
+        '<button class="btn btn-p" onclick="savePlanProject()">儲存</button></div>';
+  } else if (type === 'planRecurring') {
+    var editingR = editId ? (d.recurring || []).find(function(r) { return r.id === editId; }) : null;
+    var curOptsR = Object.entries(CURRENCIES).map(function(entry) {
+      return '<option value="' + entry[0] + '"' + (editingR && editingR.currency === entry[0] ? ' selected' : '') + '>' + entry[0] + ' ' + entry[1] + '</option>';
+    }).join('');
+    var acctOptsR = d.accounts.filter(function(a) { return a.type === 'bank' || a.type === 'cash' || a.type === 'credit'; })
+      .map(function(a) {
+        return '<option value="' + a.id + '"' + (editingR && editingR.accountId === a.id ? ' selected' : '') + '>' + a.name + '</option>';
+      }).join('');
+    var catOptsRInc = (d.incomeCategories || []).map(function(c) {
+      return '<option value="' + c + '"' + (editingR && editingR.category === c ? ' selected' : '') + '>' + c + '</option>';
+    }).join('');
+    var catOptsRExp = (d.expenseCategories || []).map(function(c) {
+      return '<option value="' + c + '"' + (editingR && editingR.category === c ? ' selected' : '') + '>' + c + '</option>';
+    }).join('');
+    var isInc = editingR ? editingR.type === 'income' : false;
+    m.innerHTML = '<h3>' + (editingR ? '編輯' : '新增') + '定期收支項目</h3>' +
+      '<div class="form-row"><div class="form-group"><label>類型</label><select id="f_rType" onchange="_planRecurringTypeChange()">' +
+        '<option value="expense"' + (!isInc ? ' selected' : '') + '>支出</option>' +
+        '<option value="income"' + (isInc ? ' selected' : '') + '>收入</option>' +
+      '</select></div>' +
+      '<div class="form-group" style="flex:3"><label>名稱</label><input type="text" id="f_rName" placeholder="如：房貸、Netflix 訂閱" value="' + (editingR ? editingR.name || '' : '') + '"></div></div>' +
+      '<div class="form-row"><div class="form-group"><label>金額</label><input type="number" id="f_rAmt" step="0.01" value="' + (editingR ? editingR.amount : '') + '"></div>' +
+      '<div class="form-group"><label>幣別</label><select id="f_rCur">' + curOptsR + '</select></div></div>' +
+      '<div class="form-row"><div class="form-group"><label>分類</label><select id="f_rCat">' + (isInc ? catOptsRInc : catOptsRExp) + '</select></div>' +
+      '<div class="form-group"><label>扣款/入帳日</label><input type="number" id="f_rDay" min="1" max="28" value="' + (editingR ? editingR.dayOfMonth || 1 : 1) + '"></div></div>' +
+      '<div class="form-group"><label>對應帳戶</label><select id="f_rAcct">' + acctOptsR + '</select></div>' +
+      '<div class="form-group"><label>備註</label><input type="text" id="f_rNote" value="' + (editingR ? editingR.note || '' : '') + '"></div>' +
+      '<div class="form-group"><label><input type="checkbox" id="f_rActive"' + (!editingR || editingR.active !== false ? ' checked' : '') + '> 啟用（每月自動產生記錄）</label></div>' +
+      '<input type="hidden" id="f_editId" value="' + (editId || '') + '">' +
+      '<div class="modal-actions">' +
+        (editingR ? '<button class="btn btn-s" style="color:var(--red)" onclick="deletePlanRecurring(\'' + editingR.id + '\')">刪除</button>' : '') +
+        '<button class="btn btn-s" onclick="closeModal()">取消</button>' +
+        '<button class="btn btn-p" onclick="savePlanRecurring()">儲存</button></div>';
+  } else if (type === 'planGoal') {
+    var editingG = editId ? (d.savingsGoals || []).find(function(g) { return g.id === editId; }) : null;
+    var curOptsG = Object.entries(CURRENCIES).map(function(entry) {
+      return '<option value="' + entry[0] + '"' + (editingG && editingG.currency === entry[0] ? ' selected' : '') + '>' + entry[0] + ' ' + entry[1] + '</option>';
+    }).join('');
+    var projOptsG = '<option value="">（不綁定專案）</option>' +
+      (d.projects || []).map(function(p) {
+        return '<option value="' + p.id + '"' + (editingG && editingG.projectId === p.id ? ' selected' : '') + '>' + (p.emoji || '📁') + ' ' + p.name + '</option>';
+      }).join('');
+    m.innerHTML = '<h3>' + (editingG ? '編輯' : '新增') + '儲蓄目標</h3>' +
+      '<div class="form-row"><div class="form-group"><label>Emoji</label><input type="text" id="f_gEmoji" maxlength="2" placeholder="🎯" value="' + (editingG ? editingG.emoji || '🎯' : '🎯') + '"></div>' +
+      '<div class="form-group" style="flex:3"><label>名稱</label><input type="text" id="f_gName" placeholder="如：買車、京都自由行" value="' + (editingG ? editingG.name || '' : '') + '"></div></div>' +
+      '<div class="form-row"><div class="form-group"><label>目標金額</label><input type="number" id="f_gTarget" step="1" value="' + (editingG ? editingG.targetAmount || '' : '') + '"></div>' +
+      '<div class="form-group"><label>幣別</label><select id="f_gCur">' + curOptsG + '</select></div></div>' +
+      '<div class="form-group"><label>目標截止日</label><input type="date" id="f_gDeadline" value="' + (editingG ? editingG.deadline || '' : '') + '"></div>' +
+      '<div class="form-group"><label>綁定專案（可選）<span style="font-size:11px;color:var(--text3);margin-left:8px">已累計金額會從該專案的淨收支算</span></label><select id="f_gProject">' + projOptsG + '</select></div>' +
+      '<div class="form-group"><label>備註</label><input type="text" id="f_gNote" value="' + (editingG ? editingG.note || '' : '') + '"></div>' +
+      '<input type="hidden" id="f_editId" value="' + (editId || '') + '">' +
+      '<div class="modal-actions">' +
+        (editingG ? '<button class="btn btn-s" style="color:var(--red)" onclick="deletePlanGoal(\'' + editingG.id + '\')">刪除</button>' : '') +
+        '<button class="btn btn-s" onclick="closeModal()">取消</button>' +
+        '<button class="btn btn-p" onclick="savePlanGoal()">儲存</button></div>';
   }
   document.getElementById('modalOverlay').classList.add('show');
+}
+
+/** 定期項目 Modal 中切換 type 時重建分類下拉 */
+function _planRecurringTypeChange() {
+  var type = document.getElementById('f_rType').value;
+  var d = U();
+  var cats = type === 'income' ? (d.incomeCategories || []) : (d.expenseCategories || []);
+  var sel = document.getElementById('f_rCat');
+  sel.innerHTML = cats.map(function(c) { return '<option value="' + c + '">' + c + '</option>'; }).join('');
 }
 
 function closeModal() {
@@ -2516,7 +3034,8 @@ function saveIncome() {
     currency: document.getElementById('f_cur').value,
     note: document.getElementById('f_note').value,
     payTo: document.getElementById('f_payTo').value,
-    usedBy: document.getElementById('f_usedBy').value
+    usedBy: document.getElementById('f_usedBy').value,
+    projectId: (document.getElementById('f_project') || {}).value || ''
   };
   if (editId) {
     var old = d.incomes.find(function(i) { return i.id === editId; });
@@ -2559,7 +3078,8 @@ function saveExpense() {
     note: document.getElementById('f_note').value,
     payTo: document.getElementById('f_payTo').value,
     usedBy: document.getElementById('f_usedBy').value,
-    transferAccount: payMethod === '銀行轉帳' && transferAcctEl ? transferAcctEl.value : ''
+    transferAccount: payMethod === '銀行轉帳' && transferAcctEl ? transferAcctEl.value : '',
+    projectId: (document.getElementById('f_project') || {}).value || ''
   };
   if (editId) {
     var old = d.expenses.find(function(e) { return e.id === editId; });
@@ -2945,10 +3465,51 @@ function resetAll() {
 
 // ============ 信用卡帳單 OCR 掃描 ============
 var _billParsedItems = [];
+var _billSelectedCardId = '';  // v1.8.6: 掃描前先選好歸屬信用卡
+
+/** 填入信用卡下拉 + 判斷是否有卡 */
+function _populateBillCardPicker() {
+  var d = U();
+  var creditCards = (d.accounts || []).filter(function(a) { return a.type === 'credit'; });
+  var sel = document.getElementById('billCardSelect');
+  var empty = document.getElementById('billCardEmpty');
+  var upload = document.getElementById('billUploadArea');
+
+  if (creditCards.length === 0) {
+    sel.innerHTML = '';
+    sel.style.display = 'none';
+    empty.style.display = 'block';
+    if (upload) upload.style.opacity = '0.4', upload.style.pointerEvents = 'none';
+    _billSelectedCardId = '';
+    return;
+  }
+  sel.style.display = '';
+  empty.style.display = 'none';
+  if (upload) upload.style.opacity = '', upload.style.pointerEvents = '';
+
+  // 優先保留上一次選擇；若該卡已被刪除則用第一張
+  var keepId = creditCards.find(function(a) { return a.id === _billSelectedCardId; }) ? _billSelectedCardId : creditCards[0].id;
+  _billSelectedCardId = keepId;
+  sel.innerHTML = creditCards.map(function(a) {
+    return '<option value="' + a.id + '"' + (a.id === keepId ? ' selected' : '') + '>' +
+      a.name + (a.institution ? '（' + a.institution + '）' : '') + '｜' + a.currency + '</option>';
+  }).join('');
+}
+
+function onBillCardChange() {
+  var sel = document.getElementById('billCardSelect');
+  _billSelectedCardId = sel.value;
+  // 若已經有解析結果，把所有項目的 accountId 改為新選的卡
+  if (_billParsedItems.length > 0) {
+    _billParsedItems.forEach(function(it) { it.accountId = _billSelectedCardId; });
+    renderBillResults();
+  }
+}
 
 function openBillScanner() {
   var overlay = document.getElementById('billScannerOverlay');
   resetBillScanner();
+  _populateBillCardPicker();
   overlay.classList.add('show');
 }
 
@@ -3486,8 +4047,15 @@ function renderBillResults() {
   }).join('');
 
   // 找預設信用卡帳戶
-  var defaultCreditAcct = d.accounts.find(function(a) { return a.type === 'credit'; });
-  var defaultAcctId = defaultCreditAcct ? defaultCreditAcct.id : (d.accounts[0] ? d.accounts[0].id : '');
+  // v1.8.6：預設帳戶用掃描前選好的信用卡；若未設定則找第一張信用卡 fallback
+  var defaultAcctId = _billSelectedCardId ||
+    (d.accounts.find(function(a) { return a.type === 'credit'; }) || {}).id ||
+    (d.accounts[0] ? d.accounts[0].id : '');
+
+  // 未設定過的項目一律套用選定的卡
+  _billParsedItems.forEach(function(item) {
+    if (!item.accountId) item.accountId = defaultAcctId;
+  });
 
   listEl.innerHTML = _billParsedItems.map(function(item, idx) {
     return '<div class="bill-item" id="billItem' + idx + '">' +
@@ -3508,18 +4076,13 @@ function renderBillResults() {
         '<div class="bill-item-row">' +
           '<select onchange="_billParsedItems[' + idx + '].accountId=this.value" style="flex:1">' +
             d.accounts.map(function(a) {
-              return '<option value="' + a.id + '"' + (a.id === defaultAcctId ? ' selected' : '') + '>' + a.name + '</option>';
+              return '<option value="' + a.id + '"' + (a.id === (item.accountId || defaultAcctId) ? ' selected' : '') + '>' + a.name + '</option>';
             }).join('') +
           '</select>' +
         '</div>' +
       '</div>' +
     '</div>';
   }).join('');
-
-  // 設定預設帳戶 ID
-  _billParsedItems.forEach(function(item) {
-    if (!item.accountId) item.accountId = defaultAcctId;
-  });
 
   resultArea.style.display = 'block';
 }

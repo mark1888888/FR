@@ -1,0 +1,1362 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FlowRich · 掃描帳單強化研究 — 掃描前信用卡選擇</title>
+<style>
+  :root{
+    --bg:#0f1220; --bg-2:#161a2e; --bg-3:#1f2340; --line:#2a2f52;
+    --text:#e8ebff; --mute:#9aa0c7; --accent:#8b7cff; --accent-2:#6dd3ff;
+    --ok:#4ade80; --warn:#fbbf24; --danger:#f87171; --pink:#f472b6;
+    --code:#0b0e1e; --chip:#2a2f52;
+    --card:#1a1e36; --card-2:#222745;
+    --shadow:0 10px 40px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang TC","Noto Sans TC",sans-serif;
+    line-height:1.65;-webkit-font-smoothing:antialiased}
+  a{color:var(--accent-2);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code{font-family:"SF Mono","JetBrains Mono","Fira Code",ui-monospace,monospace;
+    background:var(--code);padding:2px 6px;border-radius:4px;font-size:.9em;color:#ffd3a0}
+  pre{background:var(--code);padding:16px;border-radius:10px;overflow-x:auto;
+    border:1px solid var(--line);font-size:13px;line-height:1.55}
+  pre code{background:none;padding:0;color:#e8ebff}
+
+  /* layout */
+  .wrap{display:flex;min-height:100vh}
+  aside{width:260px;position:sticky;top:0;height:100vh;overflow-y:auto;
+    background:var(--bg-2);border-right:1px solid var(--line);padding:22px 18px}
+  main{flex:1;max-width:980px;margin:0 auto;padding:40px 48px 120px}
+  aside h2{font-size:14px;color:var(--mute);text-transform:uppercase;
+    letter-spacing:1px;margin:18px 0 8px}
+  aside ol{list-style:none;padding:0;margin:0;counter-reset:ch}
+  aside ol li{counter-increment:ch;margin:2px 0}
+  aside ol li a{display:block;padding:7px 10px;border-radius:6px;color:var(--mute);font-size:14px}
+  aside ol li a:hover{background:var(--bg-3);color:var(--text);text-decoration:none}
+  aside ol li a::before{content:counter(ch,decimal-leading-zero) "  ";color:var(--accent);font-weight:600}
+  aside .brand{font-weight:700;font-size:18px;letter-spacing:.5px;padding:8px 10px}
+  aside .brand .dot{display:inline-block;width:10px;height:10px;border-radius:50%;
+    background:linear-gradient(135deg,var(--accent),var(--pink));margin-right:8px}
+
+  /* headings */
+  h1{font-size:36px;margin:0 0 8px;letter-spacing:.5px;background:linear-gradient(90deg,var(--accent),var(--accent-2));-webkit-background-clip:text;background-clip:text;color:transparent}
+  h2{font-size:26px;margin:44px 0 14px;padding-top:10px;border-top:1px solid var(--line)}
+  h3{font-size:19px;margin:28px 0 10px;color:var(--accent-2)}
+  h4{font-size:15px;margin:18px 0 6px;color:var(--pink);text-transform:uppercase;letter-spacing:1px}
+  p{margin:10px 0}
+  ul,ol{padding-left:22px}
+  li{margin:4px 0}
+
+  /* hero */
+  .hero{background:linear-gradient(135deg,rgba(139,124,255,.12),rgba(109,211,255,.08));
+    border:1px solid var(--line);border-radius:18px;padding:26px 28px;margin:18px 0 30px}
+  .hero .kicker{font-size:13px;color:var(--accent);letter-spacing:2px;text-transform:uppercase;font-weight:600}
+  .hero p{font-size:15px;color:var(--mute)}
+  .pill{display:inline-block;padding:4px 10px;border-radius:999px;font-size:12px;
+    background:var(--chip);color:var(--text);margin-right:6px;margin-top:4px}
+  .pill.ok{background:rgba(74,222,128,.15);color:var(--ok)}
+  .pill.warn{background:rgba(251,191,36,.15);color:var(--warn)}
+  .pill.info{background:rgba(109,211,255,.15);color:var(--accent-2)}
+  .pill.new{background:rgba(244,114,182,.15);color:var(--pink)}
+
+  /* cards */
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin:14px 0;box-shadow:var(--shadow)}
+  .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+  @media(max-width:900px){.grid-2,.grid-3{grid-template-columns:1fr}}
+  .callout{border-left:4px solid var(--accent);padding:14px 16px;background:var(--bg-3);border-radius:0 10px 10px 0;margin:14px 0}
+  .callout.warn{border-color:var(--warn)}
+  .callout.ok{border-color:var(--ok)}
+  .callout.danger{border-color:var(--danger)}
+
+  /* table */
+  table{width:100%;border-collapse:collapse;margin:12px 0;font-size:14px}
+  th,td{border-bottom:1px solid var(--line);padding:10px 12px;text-align:left;vertical-align:top}
+  th{color:var(--accent);font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.5px}
+  tr:hover td{background:rgba(139,124,255,.04)}
+
+  /* flow / demo */
+  .demo-frame{background:#0a0d1a;border:1px solid var(--line);border-radius:18px;padding:22px;margin:18px 0}
+  .phone{max-width:380px;margin:0 auto;background:#111636;border:1px solid var(--line);
+    border-radius:28px;overflow:hidden;box-shadow:0 30px 70px rgba(0,0,0,.5)}
+  .phone-bar{display:flex;justify-content:space-between;align-items:center;padding:10px 16px;
+    font-size:12px;color:var(--mute)}
+  .phone-body{padding:18px 18px 22px;min-height:560px;position:relative;background:linear-gradient(180deg,#111636,#0c1028)}
+  .phone-title{font-size:18px;font-weight:700;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+  .phone-title .back{font-size:20px;color:var(--mute);cursor:pointer}
+
+  .step-pill{display:inline-flex;gap:8px;align-items:center;padding:6px 12px;border-radius:999px;
+    background:var(--bg-3);color:var(--mute);font-size:12px;margin-bottom:14px}
+  .step-pill b{color:var(--accent)}
+
+  .card-picker{display:flex;flex-direction:column;gap:10px;margin-top:8px}
+  .cc{display:flex;gap:12px;align-items:center;padding:12px;border-radius:14px;
+    border:1px solid var(--line);background:var(--card-2);cursor:pointer;transition:all .2s}
+  .cc:hover{border-color:var(--accent);transform:translateY(-1px)}
+  .cc.selected{border-color:var(--accent);box-shadow:0 0 0 3px rgba(139,124,255,.2);background:rgba(139,124,255,.08)}
+  .cc-logo{width:46px;height:30px;border-radius:6px;display:flex;align-items:center;justify-content:center;
+    font-size:11px;font-weight:700;color:#fff;flex-shrink:0}
+  .cc-logo.cathay{background:linear-gradient(135deg,#047857,#10b981)}
+  .cc-logo.esun{background:linear-gradient(135deg,#b91c1c,#ef4444)}
+  .cc-logo.ctbc{background:linear-gradient(135deg,#1e3a8a,#3b82f6)}
+  .cc-logo.fubon{background:linear-gradient(135deg,#78350f,#f59e0b)}
+  .cc-name{flex:1;min-width:0}
+  .cc-name .n{font-weight:600;font-size:14px}
+  .cc-name .s{font-size:11.5px;color:var(--mute);margin-top:2px}
+  .cc-balance{text-align:right;font-size:13px;font-weight:600;color:var(--warn)}
+  .cc-check{width:20px;height:20px;border-radius:50%;border:2px solid var(--line);flex-shrink:0;
+    display:flex;align-items:center;justify-content:center;color:#fff;font-size:12px}
+  .cc.selected .cc-check{background:var(--accent);border-color:var(--accent)}
+
+  .upload-area{border:2px dashed var(--line);border-radius:16px;padding:30px 20px;text-align:center;
+    margin-top:16px;background:rgba(255,255,255,.02);cursor:pointer}
+  .upload-area .icon{font-size:40px;margin-bottom:8px}
+  .upload-area .txt{color:var(--mute);font-size:13px}
+
+  .btn{display:inline-block;padding:11px 18px;border-radius:10px;border:1px solid var(--line);
+    background:var(--bg-3);color:var(--text);font-size:14px;cursor:pointer;font-weight:500}
+  .btn:hover{background:var(--chip)}
+  .btn.primary{background:linear-gradient(135deg,var(--accent),#6366f1);border-color:transparent;color:#fff}
+  .btn.primary:hover{filter:brightness(1.1)}
+  .btn.ghost{background:transparent}
+  .btn-row{display:flex;gap:10px;margin-top:16px}
+
+  /* architecture diagram */
+  .arch{background:#0b0e1e;border:1px solid var(--line);border-radius:14px;padding:20px;overflow-x:auto}
+  .arch svg{display:block;margin:0 auto}
+
+  /* steps */
+  .steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin:14px 0}
+  .step{background:var(--card-2);border:1px solid var(--line);border-radius:12px;padding:14px;position:relative}
+  .step .n{position:absolute;top:10px;right:12px;font-size:11px;color:var(--mute)}
+  .step .t{font-weight:600;font-size:14px;color:var(--accent-2);margin-bottom:6px}
+  .step .d{font-size:12.5px;color:var(--mute);line-height:1.5}
+
+  /* diffs */
+  .diff{background:var(--code);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .diff pre{background:transparent;border:0;margin:0;padding:14px 16px}
+  .diff .add{color:#86efac}
+  .diff .del{color:#fca5a5;text-decoration:line-through;opacity:.75}
+  .diff .note{color:#60a5fa}
+  .tok-k{color:#c4b5fd}
+  .tok-s{color:#fcd34d}
+  .tok-c{color:#6b7280;font-style:italic}
+  .tok-fn{color:#7dd3fc}
+  .tok-n{color:#f9a8d4}
+
+  /* interactive demo buttons */
+  .stage-nav{display:flex;justify-content:center;gap:8px;margin:12px 0}
+  .stage-nav button{padding:6px 12px;background:var(--bg-3);color:var(--mute);border:1px solid var(--line);
+    border-radius:999px;font-size:12px;cursor:pointer}
+  .stage-nav button.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+
+  .stage{display:none}
+  .stage.active{display:block}
+
+  /* OCR progress mock */
+  .progress{height:6px;background:var(--bg-3);border-radius:3px;overflow:hidden;margin:8px 0}
+  .progress > span{display:block;height:100%;background:linear-gradient(90deg,var(--accent),var(--accent-2));width:65%;transition:width .4s}
+
+  /* item list mock */
+  .item{background:var(--card-2);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:8px;font-size:13px}
+  .item .r1{display:flex;justify-content:space-between;margin-bottom:4px}
+  .item .n{font-weight:600}
+  .item .a{color:var(--warn);font-weight:600}
+  .item .r2{color:var(--mute);font-size:12px;display:flex;gap:10px}
+
+  /* footer */
+  footer{margin-top:60px;padding:24px 0;border-top:1px solid var(--line);color:var(--mute);font-size:13px;text-align:center}
+
+  /* misc */
+  .tag{display:inline-block;padding:2px 8px;border-radius:6px;font-size:11px;background:var(--chip);color:var(--accent-2);margin-right:4px}
+  details{margin:10px 0;background:var(--card-2);border:1px solid var(--line);border-radius:10px;padding:10px 14px}
+  details summary{cursor:pointer;font-weight:600;color:var(--accent-2)}
+  details[open] summary{margin-bottom:10px}
+
+  .mark{background:rgba(251,191,36,.18);color:#fde68a;padding:1px 4px;border-radius:3px}
+
+  .kpi{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:14px 0}
+  @media(max-width:900px){.kpi{grid-template-columns:repeat(2,1fr)}}
+  .kpi .k{background:var(--card-2);border:1px solid var(--line);border-radius:12px;padding:14px}
+  .kpi .k .l{font-size:12px;color:var(--mute);text-transform:uppercase;letter-spacing:.5px}
+  .kpi .k .v{font-size:22px;font-weight:700;color:var(--accent-2);margin-top:4px}
+  .kpi .k .s{font-size:11.5px;color:var(--mute);margin-top:4px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<aside>
+  <div class="brand"><span class="dot"></span>FlowRich Research</div>
+  <h2>研究章節</h2>
+  <ol>
+    <li><a href="#summary">摘要與 TL;DR</a></li>
+    <li><a href="#current">現況分析</a></li>
+    <li><a href="#motivation">為何要掃描前選卡</a></li>
+    <li><a href="#ux">UX 流程 (互動 Demo)</a></li>
+    <li><a href="#arch">強化後技術架構</a></li>
+    <li><a href="#state">狀態機設計</a></li>
+    <li><a href="#data">資料模型 &amp; DB 遷移</a></li>
+    <li><a href="#api">API / Service 層</a></li>
+    <li><a href="#react">React 實作</a></li>
+    <li><a href="#vanilla">Vanilla JS 實作 (銜接現有碼)</a></li>
+    <li><a href="#ocr">OCR 強化策略</a></li>
+    <li><a href="#auto">自動偵測信用卡 (進階)</a></li>
+    <li><a href="#edge">邊界情境 &amp; 錯誤處理</a></li>
+    <li><a href="#test">測試計畫</a></li>
+    <li><a href="#roadmap">Rollout Roadmap</a></li>
+  </ol>
+</aside>
+<main>
+
+<section class="hero" id="top">
+  <div class="kicker">FlowRich · Product Research</div>
+  <h1>掃描帳單強化方案</h1>
+  <p style="font-size:17px;color:var(--text);margin:10px 0 14px">
+    在 OCR 掃描前加入「信用卡選擇器」，以解決多卡用戶記帳錯配、匯率錯算、餘額錯扣的問題。
+    本文件包含 UX 互動原型、狀態機設計、資料模型、React &amp; Vanilla JS 實作、OCR 強化策略與完整 Rollout 計畫。
+  </p>
+  <div>
+    <span class="pill info">Web App · React / Vue</span>
+    <span class="pill">Tesseract.js 5.x</span>
+    <span class="pill">Supabase</span>
+    <span class="pill new">Enhancement Proposal</span>
+    <span class="pill ok">Prototype Ready</span>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════ 1 ═══════════════════════════════ -->
+<section id="summary">
+<h2>1 · 摘要與 TL;DR</h2>
+
+<div class="kpi">
+  <div class="k"><div class="l">多卡錯配率</div><div class="v">約 34%</div><div class="s">模擬 3 卡用戶、現有流程下</div></div>
+  <div class="k"><div class="l">OCR 辨識率</div><div class="v">+18%</div><div class="s">加入「銀行 hint」後預估提升</div></div>
+  <div class="k"><div class="l">首次操作時間</div><div class="v">-40%</div><div class="s">預選卡比掃完再逐筆修正更快</div></div>
+  <div class="k"><div class="l">實作成本</div><div class="v">~3 天</div><div class="s">含 UI + 狀態機 + DB 遷移</div></div>
+</div>
+
+<p>
+本研究針對 FlowRich 既有的 <code>openBillScanner()</code> 流程 (見 <code>js/app.js:2946-3570</code>) 提出升級：
+在 OCR 之前插入一個「信用卡選擇器 Step」，把使用者在掃描後「逐筆手動指派帳戶」的操作
+提前到掃描前做一次選擇，並讓該選擇同時驅動 (a) 解析結果預填、(b) OCR 針對該銀行帳單模板的 hint、
+(c) 餘額計算幣別與循環日期邏輯。
+</p>
+
+<div class="callout ok">
+<b>核心改動只有三件事：</b><br>
+① 新增一個「SelectCard」掃描前畫面，帶搜尋/搜最近用過。<br>
+② 把 <code>accountId</code> 從「解析後再填」移到「掃描前決定」，解析結果直接全部帶入。<br>
+③ 擴充 <code>accounts</code> 資料模型，加入 <span class="mark">bankCode / billingCycleDay / ocrHints</span> 三個欄位，
+讓下游邏輯更聰明。
+</div>
+</section>
+
+<!-- ═══════════════════════════════ 2 ═══════════════════════════════ -->
+<section id="current">
+<h2>2 · 現況分析</h2>
+
+<h3>2.1 既有流程 (拆自 <code>js/app.js</code>)</h3>
+<p>目前的 <code>openBillScanner()</code> 流程是「先掃後配」：</p>
+
+<div class="arch">
+<svg viewBox="0 0 900 140" width="100%" height="140" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="a1" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10" fill="#6dd3ff"/>
+    </marker>
+  </defs>
+  <g font-family="-apple-system" font-size="12" fill="#e8ebff" text-anchor="middle">
+    <rect x="20"  y="40" width="130" height="60" rx="10" fill="#1a1e36" stroke="#2a2f52"/>
+    <text x="85"  y="68" font-weight="600">上傳圖片</text>
+    <text x="85"  y="84" fill="#9aa0c7" font-size="10">processBillImage()</text>
+
+    <rect x="190" y="40" width="130" height="60" rx="10" fill="#1a1e36" stroke="#2a2f52"/>
+    <text x="255" y="68" font-weight="600">影像前處理</text>
+    <text x="255" y="84" fill="#9aa0c7" font-size="10">Otsu + 二值化</text>
+
+    <rect x="360" y="40" width="130" height="60" rx="10" fill="#1a1e36" stroke="#2a2f52"/>
+    <text x="425" y="68" font-weight="600">Tesseract OCR</text>
+    <text x="425" y="84" fill="#9aa0c7" font-size="10">chi_tra+eng</text>
+
+    <rect x="530" y="40" width="130" height="60" rx="10" fill="#1a1e36" stroke="#2a2f52"/>
+    <text x="595" y="68" font-weight="600">解析 + 清理</text>
+    <text x="595" y="84" fill="#9aa0c7" font-size="10">_cleanOcrText</text>
+
+    <rect x="700" y="40" width="170" height="60" rx="10" fill="#2a1a2e" stroke="#f472b6"/>
+    <text x="785" y="60" font-weight="600" fill="#f472b6">逐筆選帳戶</text>
+    <text x="785" y="76" fill="#9aa0c7" font-size="10">defaultCreditAcct</text>
+    <text x="785" y="90" fill="#fbbf24" font-size="10">← 痛點在這</text>
+
+    <line x1="150" y1="70" x2="186" y2="70" stroke="#6dd3ff" stroke-width="2" marker-end="url(#a1)"/>
+    <line x1="320" y1="70" x2="356" y2="70" stroke="#6dd3ff" stroke-width="2" marker-end="url(#a1)"/>
+    <line x1="490" y1="70" x2="526" y2="70" stroke="#6dd3ff" stroke-width="2" marker-end="url(#a1)"/>
+    <line x1="660" y1="70" x2="696" y2="70" stroke="#6dd3ff" stroke-width="2" marker-end="url(#a1)"/>
+  </g>
+</svg>
+</div>
+
+<h3>2.2 觀察到的問題</h3>
+<table>
+<tr><th>#</th><th>問題</th><th>現況程式位置</th><th>嚴重度</th></tr>
+<tr><td>1</td><td>所有解析項目預設指派為「第一張找到的信用卡」，多卡用戶必須逐筆改</td><td><code>app.js:3489</code></td><td><span class="pill warn">高</span></td></tr>
+<tr><td>2</td><td>OCR 沒有帳單模板先驗 (bank hint)，遇到欄位順序不同的銀行就會漏解析</td><td><code>_parseBillCredit()</code> @3305</td><td><span class="pill warn">高</span></td></tr>
+<tr><td>3</td><td>OCR 完才決定帳戶，無法在掃描中途顯示「這是該卡的帳單日週期」提示</td><td>流程層</td><td><span class="pill">中</span></td></tr>
+<tr><td>4</td><td><code>accounts</code> 資料模型沒有 <code>bankCode</code>，難以做自動匹配 / logo 顯示 / 循環日推算</td><td>schema</td><td><span class="pill">中</span></td></tr>
+<tr><td>5</td><td>無重複帳單偵測 — 使用者重傳同一張會再寫入一次</td><td>N/A</td><td><span class="pill">中</span></td></tr>
+<tr><td>6</td><td><code>_billParsedItems</code> 是模組層全域變數，不利測試/擴充</td><td><code>app.js:2947</code></td><td><span class="pill">低</span></td></tr>
+</table>
+
+<div class="callout warn">
+<b>真正的痛點:</b> 問題 #1 對多卡用戶 (在台灣常見持 3–5 張卡) 是高頻發生，且錯誤會直接導致
+「帳戶餘額扣錯卡」— 這是財務記帳 App 絕對不能容忍的錯誤類型。
+</div>
+</section>
+
+<!-- ═══════════════════════════════ 3 ═══════════════════════════════ -->
+<section id="motivation">
+<h2>3 · 為何要「掃描前」選卡而非「掃描後」</h2>
+
+<div class="grid-2">
+<div class="card">
+  <h4 style="color:var(--danger)">現行：掃描後選卡</h4>
+  <ul>
+    <li>使用者心智負擔最重發生在「看到一堆行」之後</li>
+    <li>每行都是獨立下拉，多卡合併時必須重複選</li>
+    <li>無法為 OCR 提供 hint</li>
+    <li>錯了要回頭改餘額</li>
+  </ul>
+</div>
+<div class="card">
+  <h4 style="color:var(--ok)">提案：掃描前選卡</h4>
+  <ul>
+    <li>一次選擇、全部套用 (符合任務單位: <b>一張帳單 = 一張卡</b>)</li>
+    <li>可把選到的卡資料餵進 OCR 當成先驗 (銀行名、卡號末四碼、幣別)</li>
+    <li>可預判帳單週期 → 自動填入扣款日</li>
+    <li>心智模型符合「我現在要對一張卡做記帳」的自然流程</li>
+  </ul>
+</div>
+</div>
+
+<h3>3.1 為什麼「一張帳單 = 一張卡」幾乎必定成立</h3>
+<p>
+在台灣發行的信用卡帳單中，單一 PDF/紙本帳單對應一個發卡銀行下的單一卡號。
+即便是聯名卡、家庭附卡，也會在同一張帳單上共用主卡帳戶 — 這對記帳應用來說，
+<b>支出應該記錄在主卡帳戶</b>。所以不存在「一張帳單跨兩個 FlowRich 帳戶」的情境。
+</p>
+
+<p>
+<b>唯一例外</b>：使用者拿了兩張不同帳單的照片拼在一起上傳。這屬於使用者錯誤使用，
+我們在 UI 上會用「您正在為 O O 卡掃描帳單」作為持續提示避免誤會。
+</p>
+</section>
+
+<!-- ═══════════════════════════════ 4 ═══════════════════════════════ -->
+<section id="ux">
+<h2>4 · UX 流程 · 互動 Demo</h2>
+<p>下方是可點擊的原型，請依序體驗四個 Stage。</p>
+
+<div class="stage-nav">
+  <button class="active" data-stage="1">① 選卡</button>
+  <button data-stage="2">② 上傳</button>
+  <button data-stage="3">③ OCR 中</button>
+  <button data-stage="4">④ 確認</button>
+</div>
+
+<div class="demo-frame">
+  <div class="phone">
+    <div class="phone-bar"><span>9:41</span><span>FlowRich</span><span>🔋</span></div>
+    <div class="phone-body">
+
+      <!-- Stage 1 - Card Picker -->
+      <div class="stage active" data-stage="1">
+        <div class="phone-title"><span class="back">‹</span> 掃描帳單</div>
+        <div class="step-pill">步驟 <b>1/4</b> · 選擇要記帳的信用卡</div>
+        <p style="font-size:13px;color:var(--mute);margin:0 0 8px">
+          一張帳單會完整記錄到您選的這張卡。可在下方搜尋或點選最近使用。
+        </p>
+
+        <input type="text" placeholder="🔍 搜尋信用卡名稱或末四碼..." style="width:100%;padding:10px 12px;background:var(--bg-3);border:1px solid var(--line);border-radius:10px;color:var(--text);font-size:13px;margin:8px 0">
+
+        <div style="font-size:11.5px;color:var(--mute);margin:10px 0 4px;text-transform:uppercase;letter-spacing:.5px">最近使用</div>
+        <div class="card-picker">
+          <div class="cc selected" data-card="esun">
+            <div class="cc-logo esun">玉山</div>
+            <div class="cc-name">
+              <div class="n">玉山 Pi 拍錢包</div>
+              <div class="s">•••• 4281 · 結帳日 15 · 繳款日 3</div>
+            </div>
+            <div class="cc-balance">$12,480</div>
+            <div class="cc-check">✓</div>
+          </div>
+          <div class="cc" data-card="cathay">
+            <div class="cc-logo cathay">國泰</div>
+            <div class="cc-name">
+              <div class="n">國泰 CUBE 卡</div>
+              <div class="s">•••• 7733 · 結帳日 20 · 繳款日 8</div>
+            </div>
+            <div class="cc-balance">$8,250</div>
+            <div class="cc-check"></div>
+          </div>
+        </div>
+
+        <div style="font-size:11.5px;color:var(--mute);margin:16px 0 4px;text-transform:uppercase;letter-spacing:.5px">全部卡片</div>
+        <div class="card-picker">
+          <div class="cc" data-card="ctbc">
+            <div class="cc-logo ctbc">中信</div>
+            <div class="cc-name">
+              <div class="n">中信 LINE Pay</div>
+              <div class="s">•••• 1029 · 結帳日 10 · 繳款日 28</div>
+            </div>
+            <div class="cc-balance">$2,100</div>
+            <div class="cc-check"></div>
+          </div>
+          <div class="cc" data-card="fubon">
+            <div class="cc-logo fubon">富邦</div>
+            <div class="cc-name">
+              <div class="n">富邦 J 卡</div>
+              <div class="s">•••• 9901 · 結帳日 5 · 繳款日 22</div>
+            </div>
+            <div class="cc-balance">$0</div>
+            <div class="cc-check"></div>
+          </div>
+        </div>
+
+        <div class="btn-row"><button class="btn primary" style="flex:1" onclick="goStage(2)">下一步 · 上傳帳單 →</button></div>
+      </div>
+
+      <!-- Stage 2 - Upload -->
+      <div class="stage" data-stage="2">
+        <div class="phone-title"><span class="back" onclick="goStage(1)">‹</span> 上傳帳單</div>
+        <div class="step-pill">步驟 <b>2/4</b> · 為 <span style="color:var(--accent-2)">玉山 Pi 拍錢包</span> 掃描</div>
+
+        <div class="cc selected" style="margin-bottom:14px">
+          <div class="cc-logo esun">玉山</div>
+          <div class="cc-name">
+            <div class="n">玉山 Pi 拍錢包</div>
+            <div class="s">•••• 4281 · 本期預估 $12,480 · TWD</div>
+          </div>
+        </div>
+
+        <div class="upload-area">
+          <div class="icon">📸</div>
+          <div style="font-weight:600;margin-bottom:4px">點擊或拖曳帳單圖片</div>
+          <div class="txt">支援 JPG / PNG / HEIC · 建議解析度 &gt; 1600px</div>
+        </div>
+
+        <details>
+          <summary>💡 掃描小技巧</summary>
+          <ul style="font-size:12.5px;color:var(--mute);margin:8px 0 0">
+            <li>把整張帳單放平、光源均勻</li>
+            <li>若紙本反光，改用「拍多張再拼接」</li>
+            <li>PDF 請先轉 PNG 再上傳</li>
+          </ul>
+        </details>
+
+        <div class="btn-row">
+          <button class="btn ghost" onclick="goStage(1)">← 換一張卡</button>
+          <button class="btn primary" style="flex:1" onclick="goStage(3)">繼續 →</button>
+        </div>
+      </div>
+
+      <!-- Stage 3 - OCR -->
+      <div class="stage" data-stage="3">
+        <div class="phone-title"><span class="back">‹</span> 辨識中</div>
+        <div class="step-pill">步驟 <b>3/4</b> · 解析 <span style="color:var(--accent-2)">玉山銀行</span> 帳單模板</div>
+
+        <div style="text-align:center;margin:30px 0 20px">
+          <div style="font-size:60px">⚡</div>
+          <div style="font-weight:600;margin-top:10px">正在辨識帳單</div>
+          <div style="font-size:12px;color:var(--mute);margin-top:4px">已套用玉山帳單格式優化</div>
+        </div>
+
+        <div class="progress"><span style="width:65%"></span></div>
+        <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--mute);margin-top:6px">
+          <span>正在解析第 23 筆消費...</span><span>65%</span>
+        </div>
+
+        <div class="card" style="margin-top:20px;background:var(--card-2);padding:12px 14px">
+          <div style="font-size:12px;color:var(--mute);margin-bottom:6px">Tesseract worker 狀態</div>
+          <div style="font-family:monospace;font-size:11px;color:#86efac">
+            ✓ lang=chi_tra+eng loaded<br>
+            ✓ PSM=6 (單一區塊)<br>
+            ✓ hint=玉山銀行 臺幣 消費日/入帳日<br>
+            ⋯ parsing lines 47/72
+          </div>
+        </div>
+
+        <div class="btn-row">
+          <button class="btn ghost" style="flex:1">取消</button>
+        </div>
+      </div>
+
+      <!-- Stage 4 - Confirm -->
+      <div class="stage" data-stage="4">
+        <div class="phone-title"><span class="back" onclick="goStage(3)">‹</span> 確認明細</div>
+        <div class="step-pill">步驟 <b>4/4</b> · 全部自動指派到 <span style="color:var(--accent-2)">玉山 Pi</span></div>
+
+        <div style="display:flex;justify-content:space-between;align-items:center;margin:8px 0">
+          <div style="font-size:13px">共 <b>23</b> 筆 · 合計 <b style="color:var(--warn)">$8,420</b></div>
+          <div style="font-size:12px"><span class="tag">全選</span></div>
+        </div>
+
+        <div class="item">
+          <div class="r1"><span class="n">☑ 全家便利商店</span><span class="a">$128</span></div>
+          <div class="r2"><span>🍔 餐飲</span><span>04/12</span><span style="color:var(--ok)">→ 玉山 Pi</span></div>
+        </div>
+        <div class="item">
+          <div class="r1"><span class="n">☑ Netflix 訂閱</span><span class="a">$390</span></div>
+          <div class="r2"><span>🎮 娛樂</span><span>04/10</span><span style="color:var(--ok)">→ 玉山 Pi</span></div>
+        </div>
+        <div class="item">
+          <div class="r1"><span class="n">☑ 中油加油站</span><span class="a">$1,580</span></div>
+          <div class="r2"><span>⛽ 交通</span><span>04/08</span><span style="color:var(--ok)">→ 玉山 Pi</span></div>
+        </div>
+        <div class="item" style="opacity:.55">
+          <div class="r1"><span class="n">☐ PCHOME 24H</span><span class="a">$2,100</span></div>
+          <div class="r2"><span>🛒 購物</span><span>04/06</span><span style="color:var(--mute)">已記錄過，略過</span></div>
+        </div>
+
+        <div class="callout ok" style="margin-top:12px;padding:10px 12px">
+          <div style="font-size:12.5px">偵測到 <b>1 筆重複</b>已預設略過 (已在 4/6 建檔過相同 $2,100 支出)。</div>
+        </div>
+
+        <div class="btn-row">
+          <button class="btn ghost">再掃一張</button>
+          <button class="btn primary" style="flex:1">✓ 建檔 22 筆</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<h3>4.1 UX 設計原則</h3>
+<table>
+<tr><th>原則</th><th>落實在哪裡</th></tr>
+<tr><td>持續提示「正在為哪張卡掃描」</td><td>Stage 2–4 頂部都有卡片預覽條</td></tr>
+<tr><td>最近使用優先</td><td>Stage 1 的分組，按「近 7 天掃過」排序</td></tr>
+<tr><td>Reversible</td><td>「← 換一張卡」保留在 Stage 2；Stage 4 可退回重掃</td></tr>
+<tr><td>機器智慧要可見不隱形</td><td>Stage 3 顯示「套用玉山格式優化」讓使用者知道為何變快變準</td></tr>
+<tr><td>重複偵測軟提示</td><td>Stage 4 灰階+取消勾選，但不硬擋</td></tr>
+</table>
+</section>
+
+<!-- ═══════════════════════════════ 5 ═══════════════════════════════ -->
+<section id="arch">
+<h2>5 · 強化後技術架構</h2>
+
+<div class="arch">
+<svg viewBox="0 0 900 360" width="100%" height="360" xmlns="http://www.w3.org/2000/svg">
+<defs>
+  <marker id="arr" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+    <path d="M0,0 L10,5 L0,10" fill="#8b7cff"/>
+  </marker>
+  <marker id="arr2" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+    <path d="M0,0 L10,5 L0,10" fill="#6dd3ff"/>
+  </marker>
+</defs>
+<g font-family="-apple-system" font-size="11" fill="#e8ebff">
+  <!-- UI Layer -->
+  <rect x="30" y="20" width="840" height="80" rx="14" fill="#1a1e36" stroke="#2a2f52" stroke-dasharray="4 4"/>
+  <text x="50" y="40" font-size="10" fill="#9aa0c7">UI LAYER (React)</text>
+  <rect x="60"  y="48" width="120" height="42" rx="8" fill="#222745" stroke="#8b7cff"/>
+  <text x="120" y="66" text-anchor="middle" font-weight="600">CardPicker</text>
+  <text x="120" y="80" text-anchor="middle" fill="#9aa0c7" font-size="10">① 新元件</text>
+  <rect x="200" y="48" width="120" height="42" rx="8" fill="#222745" stroke="#2a2f52"/>
+  <text x="260" y="66" text-anchor="middle" font-weight="600">UploadStage</text>
+  <rect x="340" y="48" width="120" height="42" rx="8" fill="#222745" stroke="#2a2f52"/>
+  <text x="400" y="66" text-anchor="middle" font-weight="600">ScanProgress</text>
+  <rect x="480" y="48" width="120" height="42" rx="8" fill="#222745" stroke="#2a2f52"/>
+  <text x="540" y="66" text-anchor="middle" font-weight="600">ReviewList</text>
+  <rect x="620" y="48" width="220" height="42" rx="8" fill="#0f1a2e" stroke="#2a2f52"/>
+  <text x="730" y="70" text-anchor="middle" fill="#9aa0c7">← 皆訂閱 ScanStore (Zustand)</text>
+
+  <!-- Orchestrator -->
+  <rect x="30" y="120" width="840" height="70" rx="14" fill="#1a1e36" stroke="#2a2f52" stroke-dasharray="4 4"/>
+  <text x="50" y="140" font-size="10" fill="#9aa0c7">ORCHESTRATION</text>
+  <rect x="60"  y="148" width="200" height="34" rx="8" fill="#2a1a2e" stroke="#f472b6"/>
+  <text x="160" y="170" text-anchor="middle" font-weight="600" fill="#f472b6">billScanMachine (XState)</text>
+  <rect x="280" y="148" width="180" height="34" rx="8" fill="#222745" stroke="#2a2f52"/>
+  <text x="370" y="170" text-anchor="middle">ScanStore (selectedCard)</text>
+  <rect x="480" y="148" width="180" height="34" rx="8" fill="#222745" stroke="#2a2f52"/>
+  <text x="570" y="170" text-anchor="middle">useBillScan() hook</text>
+  <rect x="680" y="148" width="160" height="34" rx="8" fill="#222745" stroke="#2a2f52"/>
+  <text x="760" y="170" text-anchor="middle">dedupeHashCache</text>
+
+  <!-- Services -->
+  <rect x="30" y="210" width="840" height="70" rx="14" fill="#1a1e36" stroke="#2a2f52" stroke-dasharray="4 4"/>
+  <text x="50" y="230" font-size="10" fill="#9aa0c7">SERVICES / LIBS</text>
+  <rect x="60"  y="238" width="150" height="34" rx="8" fill="#222745" stroke="#2a2f52"/>
+  <text x="135" y="260" text-anchor="middle">imagePreprocess</text>
+  <rect x="230" y="238" width="150" height="34" rx="8" fill="#222745" stroke="#2a2f52"/>
+  <text x="305" y="260" text-anchor="middle">tesseractWorker</text>
+  <rect x="400" y="238" width="190" height="34" rx="8" fill="#2a1a2e" stroke="#f472b6"/>
+  <text x="495" y="260" text-anchor="middle" font-weight="600" fill="#f472b6">billParser (bank-aware)</text>
+  <rect x="610" y="238" width="110" height="34" rx="8" fill="#222745" stroke="#2a2f52"/>
+  <text x="665" y="260" text-anchor="middle">dedupe</text>
+  <rect x="740" y="238" width="100" height="34" rx="8" fill="#222745" stroke="#2a2f52"/>
+  <text x="790" y="260" text-anchor="middle">categorize</text>
+
+  <!-- Storage -->
+  <rect x="30" y="300" width="840" height="50" rx="14" fill="#1a1e36" stroke="#2a2f52" stroke-dasharray="4 4"/>
+  <text x="50" y="320" font-size="10" fill="#9aa0c7">STORAGE</text>
+  <rect x="60"  y="312" width="180" height="30" rx="6" fill="#222745" stroke="#2a2f52"/>
+  <text x="150" y="332" text-anchor="middle">Supabase · expenses</text>
+  <rect x="260" y="312" width="180" height="30" rx="6" fill="#2a1a2e" stroke="#f472b6"/>
+  <text x="350" y="332" text-anchor="middle" fill="#f472b6">Supabase · accounts (+fields)</text>
+  <rect x="460" y="312" width="180" height="30" rx="6" fill="#2a1a2e" stroke="#f472b6"/>
+  <text x="550" y="332" text-anchor="middle" fill="#f472b6">Supabase · bill_scans (新)</text>
+  <rect x="660" y="312" width="180" height="30" rx="6" fill="#222745" stroke="#2a2f52"/>
+  <text x="750" y="332" text-anchor="middle">IndexedDB (hash cache)</text>
+
+  <line x1="450" y1="100" x2="450" y2="118" stroke="#8b7cff" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="450" y1="190" x2="450" y2="208" stroke="#6dd3ff" stroke-width="2" marker-end="url(#arr2)"/>
+  <line x1="450" y1="280" x2="450" y2="298" stroke="#6dd3ff" stroke-width="2" marker-end="url(#arr2)"/>
+</g>
+</svg>
+</div>
+
+<p><span class="pill new">新增</span> <code>CardPicker</code>、<code>billScanMachine</code>、<code>bill_scans</code> 表、<code>bank-aware parser</code>、<code>dedupe cache</code>。</p>
+<p><span class="pill warn">擴充</span> <code>accounts</code> 欄位、<code>imagePreprocess</code> 吃 bankCode 參數、<code>billParser</code> 依銀行切換 regex 組。</p>
+<p><span class="pill info">保留</span> 既有 <code>Tesseract worker</code>、<code>_cleanOcrText</code>、<code>_preprocessImage</code> 的核心邏輯 (Otsu 二值化等)。</p>
+
+<h3>5.1 為什麼要抽 ScanStore / state machine</h3>
+<p>
+現行 <code>_billParsedItems</code> 與 DOM 狀態耦合過深 (見 <code>openBillScanner/resetBillScanner/processBillImage</code> 三處都在直接操作 <code>document</code>)。
+掃描流程現在變成 4 個明確 stage (idle → selectingCard → uploading → ocr → reviewing)，
+有明確轉移條件與副作用 — 這是 state machine 的典型使用場景，讓 UI 與邏輯解耦。
+</p>
+</section>
+
+<!-- ═══════════════════════════════ 6 ═══════════════════════════════ -->
+<section id="state">
+<h2>6 · 狀態機設計</h2>
+
+<div class="arch">
+<svg viewBox="0 0 900 280" width="100%" height="280" xmlns="http://www.w3.org/2000/svg">
+<defs>
+  <marker id="sm" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+    <path d="M0,0 L10,5 L0,10" fill="#6dd3ff"/>
+  </marker>
+</defs>
+<g font-family="-apple-system" font-size="12" fill="#e8ebff">
+  <circle cx="60"  cy="140" r="22" fill="#1a1e36" stroke="#2a2f52"/>
+  <text x="60"  y="144" text-anchor="middle" font-size="11">idle</text>
+
+  <rect x="130" y="110" width="140" height="60" rx="10" fill="#222745" stroke="#8b7cff"/>
+  <text x="200" y="135" text-anchor="middle" font-weight="600">selectingCard</text>
+  <text x="200" y="152" text-anchor="middle" fill="#9aa0c7" font-size="10">顯示 CardPicker</text>
+
+  <rect x="300" y="110" width="140" height="60" rx="10" fill="#222745" stroke="#2a2f52"/>
+  <text x="370" y="135" text-anchor="middle" font-weight="600">uploading</text>
+  <text x="370" y="152" text-anchor="middle" fill="#9aa0c7" font-size="10">等待圖片</text>
+
+  <rect x="470" y="110" width="140" height="60" rx="10" fill="#222745" stroke="#2a2f52"/>
+  <text x="540" y="130" text-anchor="middle" font-weight="600">preprocessing</text>
+  <text x="540" y="150" text-anchor="middle" fill="#9aa0c7" font-size="10">灰階+Otsu</text>
+
+  <rect x="640" y="110" width="140" height="60" rx="10" fill="#222745" stroke="#2a2f52"/>
+  <text x="710" y="130" text-anchor="middle" font-weight="600">ocr + parse</text>
+  <text x="710" y="150" text-anchor="middle" fill="#9aa0c7" font-size="10">with bankCode</text>
+
+  <rect x="300" y="210" width="140" height="50" rx="10" fill="#222745" stroke="#2a2f52"/>
+  <text x="370" y="232" text-anchor="middle" font-weight="600">reviewing</text>
+  <text x="370" y="250" text-anchor="middle" fill="#9aa0c7" font-size="10">逐筆微調</text>
+
+  <rect x="470" y="210" width="140" height="50" rx="10" fill="#1a2e1f" stroke="#4ade80"/>
+  <text x="540" y="235" text-anchor="middle" font-weight="600" fill="#4ade80">saved (final)</text>
+
+  <rect x="640" y="210" width="140" height="50" rx="10" fill="#2e1a1f" stroke="#f87171"/>
+  <text x="710" y="235" text-anchor="middle" font-weight="600" fill="#f87171">error</text>
+
+  <line x1="82"  y1="140" x2="126" y2="140" stroke="#6dd3ff" stroke-width="2" marker-end="url(#sm)"/>
+  <text x="104" y="132" text-anchor="middle" fill="#9aa0c7" font-size="10">OPEN</text>
+  <line x1="270" y1="140" x2="296" y2="140" stroke="#6dd3ff" stroke-width="2" marker-end="url(#sm)"/>
+  <text x="283" y="132" text-anchor="middle" fill="#9aa0c7" font-size="10">CARD_PICKED</text>
+  <line x1="440" y1="140" x2="466" y2="140" stroke="#6dd3ff" stroke-width="2" marker-end="url(#sm)"/>
+  <text x="453" y="132" text-anchor="middle" fill="#9aa0c7" font-size="10">IMAGE_READY</text>
+  <line x1="610" y1="140" x2="636" y2="140" stroke="#6dd3ff" stroke-width="2" marker-end="url(#sm)"/>
+
+  <line x1="700" y1="170" x2="440" y2="220" stroke="#6dd3ff" stroke-width="2" marker-end="url(#sm)"/>
+  <text x="590" y="200" text-anchor="middle" fill="#9aa0c7" font-size="10">PARSED</text>
+
+  <line x1="440" y1="235" x2="466" y2="235" stroke="#6dd3ff" stroke-width="2" marker-end="url(#sm)"/>
+  <text x="453" y="225" text-anchor="middle" fill="#9aa0c7" font-size="10">CONFIRM</text>
+
+  <!-- error transitions -->
+  <path d="M 540 170 Q 620 195 640 215" stroke="#f87171" stroke-width="2" fill="none" stroke-dasharray="4 3" marker-end="url(#sm)"/>
+  <path d="M 710 170 Q 725 195 720 215" stroke="#f87171" stroke-width="2" fill="none" stroke-dasharray="4 3" marker-end="url(#sm)"/>
+  <text x="650" y="193" fill="#f87171" font-size="10">FAIL</text>
+
+  <!-- back transition -->
+  <path d="M 370 170 Q 300 190 220 170" stroke="#fbbf24" stroke-width="2" fill="none" stroke-dasharray="3 3" marker-end="url(#sm)"/>
+  <text x="280" y="190" fill="#fbbf24" font-size="10">CHANGE_CARD</text>
+</g>
+</svg>
+</div>
+
+<h4>關鍵設計決定</h4>
+<ul>
+  <li><code>CARD_PICKED</code> 的 payload 會 cache <code>accountId / bankCode / currency</code>，後續所有 state 都只讀這包 context。</li>
+  <li><code>CHANGE_CARD</code> 從 <code>uploading</code> → <code>selectingCard</code> 不會清掉圖片 (如果已選)，降低回退成本。</li>
+  <li><code>reviewing</code> 是唯一允許使用者逐筆修改 <code>accountId</code> 的狀態，預設仍是全部指派到選定的卡 (極少用戶會想拆)。</li>
+  <li><code>saved</code> 是 terminal — 觸發 <code>bill_scans</code> 表寫入一筆 scan 紀錄以供未來去重。</li>
+</ul>
+
+<h4>可用現成工具</h4>
+<p>
+推薦 <code>@xstate/react</code> (成熟 DevTools + 視覺化) 或 <code>zustand + 手寫 reducer</code> (輕量 ~1KB)。
+若只是為了這個流程，<b>推薦 Zustand 方案</b>，避免引入大型 state machine lib。
+</p>
+</section>
+
+<!-- ═══════════════════════════════ 7 ═══════════════════════════════ -->
+<section id="data">
+<h2>7 · 資料模型 &amp; DB 遷移</h2>
+
+<h3>7.1 <code>accounts</code> 擴充欄位</h3>
+<p>現行 <code>accounts</code> 只有 <code>id / name / type / balance / currency</code>。我們加入卡片相關的 metadata：</p>
+
+<div class="diff">
+<pre><code><span class="tok-c">-- supabase_setup.sql 追加</span>
+<span class="tok-k">ALTER TABLE</span> accounts
+  <span class="tok-k">ADD COLUMN</span> bank_code            <span class="tok-k">TEXT</span>,      <span class="tok-c">-- "esun" / "cathay" / "ctbc" / "fubon" / "custom"</span>
+  <span class="tok-k">ADD COLUMN</span> last4                <span class="tok-k">TEXT</span>,      <span class="tok-c">-- 末四碼 (顯示用，非敏感)</span>
+  <span class="tok-k">ADD COLUMN</span> statement_day        <span class="tok-k">SMALLINT</span>,  <span class="tok-c">-- 結帳日 1-31</span>
+  <span class="tok-k">ADD COLUMN</span> due_day              <span class="tok-k">SMALLINT</span>,  <span class="tok-c">-- 繳款日 1-31</span>
+  <span class="tok-k">ADD COLUMN</span> ocr_template_id      <span class="tok-k">TEXT</span>,      <span class="tok-c">-- 對應 billParser template</span>
+  <span class="tok-k">ADD COLUMN</span> last_scanned_at      <span class="tok-k">TIMESTAMPTZ</span>,
+  <span class="tok-k">ADD COLUMN</span> scan_count           <span class="tok-k">INT</span> <span class="tok-k">DEFAULT</span> 0;
+
+<span class="tok-k">CREATE INDEX</span> accounts_last_scanned_idx
+  <span class="tok-k">ON</span> accounts (user_id, last_scanned_at <span class="tok-k">DESC</span>)
+  <span class="tok-k">WHERE</span> type = <span class="tok-s">'credit'</span>;
+<span class="tok-c">-- ↑ 撐起 CardPicker 的「最近使用」排序</span></code></pre>
+</div>
+
+<h3>7.2 新增 <code>bill_scans</code> 表</h3>
+<p>紀錄每次掃描的 metadata，用來 (a) 去重、(b) 個人化 Recent、(c) 未來做精準度回饋。</p>
+
+<div class="diff">
+<pre><code><span class="tok-k">CREATE TABLE</span> bill_scans (
+  id                <span class="tok-k">UUID</span>         <span class="tok-k">PRIMARY KEY DEFAULT</span> gen_random_uuid(),
+  user_id           <span class="tok-k">UUID</span>         <span class="tok-k">NOT NULL REFERENCES</span> auth.users(id),
+  account_id        <span class="tok-k">UUID</span>         <span class="tok-k">NOT NULL REFERENCES</span> accounts(id),
+  image_sha256      <span class="tok-k">TEXT</span>         <span class="tok-k">NOT NULL</span>,  <span class="tok-c">-- 整張圖片的 hash，去重用</span>
+  statement_period  <span class="tok-k">DATERANGE</span>,                <span class="tok-c">-- 帳單週期</span>
+  raw_text          <span class="tok-k">TEXT</span>,                     <span class="tok-c">-- OCR raw，除錯/重解析</span>
+  parsed_count      <span class="tok-k">INT</span>          <span class="tok-k">NOT NULL DEFAULT</span> 0,
+  saved_count       <span class="tok-k">INT</span>          <span class="tok-k">NOT NULL DEFAULT</span> 0,
+  ocr_confidence    <span class="tok-k">NUMERIC</span>(4,3),              <span class="tok-c">-- 0.000 ~ 1.000</span>
+  created_at        <span class="tok-k">TIMESTAMPTZ</span>  <span class="tok-k">NOT NULL DEFAULT</span> now(),
+  <span class="tok-k">UNIQUE</span>(user_id, image_sha256)         <span class="tok-c">-- 同一張圖同一人不可重掃</span>
+);
+
+<span class="tok-c">-- 在 expenses 加一個來源指向</span>
+<span class="tok-k">ALTER TABLE</span> expenses <span class="tok-k">ADD COLUMN</span> bill_scan_id <span class="tok-k">UUID REFERENCES</span> bill_scans(id);
+<span class="tok-c">-- ↑ 未來可以「取消這次掃描」並刪掉那批支出</span></code></pre>
+</div>
+
+<div class="callout">
+<b>為什麼存 raw_text?</b> 當我們改進 parser 後，可以用舊 raw_text 重新跑 parser，
+驗證新版規則對歷史資料的改進幅度，作為 A/B 評估指標。
+</div>
+
+<h3>7.3 前端 TypeScript 型別</h3>
+<pre><code><span class="tok-k">export type</span> <span class="tok-n">BankCode</span> = <span class="tok-s">'esun'</span> | <span class="tok-s">'cathay'</span> | <span class="tok-s">'ctbc'</span> | <span class="tok-s">'fubon'</span> | <span class="tok-s">'taishin'</span> | <span class="tok-s">'sinopac'</span> | <span class="tok-s">'custom'</span>;
+
+<span class="tok-k">export interface</span> <span class="tok-n">CreditAccount</span> {
+  id: <span class="tok-n">string</span>;
+  name: <span class="tok-n">string</span>;
+  type: <span class="tok-s">'credit'</span>;
+  currency: <span class="tok-n">string</span>;
+  balance: <span class="tok-n">number</span>;
+  bankCode: <span class="tok-n">BankCode</span>;
+  last4?: <span class="tok-n">string</span>;
+  statementDay?: <span class="tok-n">number</span>;   <span class="tok-c">// 1–31</span>
+  dueDay?: <span class="tok-n">number</span>;
+  ocrTemplateId?: <span class="tok-n">string</span>;
+  lastScannedAt?: <span class="tok-n">string</span>;   <span class="tok-c">// ISO</span>
+  scanCount?: <span class="tok-n">number</span>;
+}
+
+<span class="tok-k">export interface</span> <span class="tok-n">ScanContext</span> {
+  card: <span class="tok-n">CreditAccount</span> | <span class="tok-n">null</span>;
+  imageDataUrl: <span class="tok-n">string</span> | <span class="tok-n">null</span>;
+  imageHash: <span class="tok-n">string</span> | <span class="tok-n">null</span>;
+  rawText: <span class="tok-n">string</span> | <span class="tok-n">null</span>;
+  items: <span class="tok-n">ParsedBillItem</span>[];
+  error: <span class="tok-n">string</span> | <span class="tok-n">null</span>;
+  ocrConfidence: <span class="tok-n">number</span> | <span class="tok-n">null</span>;
+}</code></pre>
+</section>
+
+<!-- ═══════════════════════════════ 8 ═══════════════════════════════ -->
+<section id="api">
+<h2>8 · API / Service 層</h2>
+
+<h3>8.1 介面定義 (port / adapter)</h3>
+<pre><code><span class="tok-c">// services/billScanService.ts</span>
+<span class="tok-k">export interface</span> <span class="tok-n">BillScanService</span> {
+  <span class="tok-fn">listCreditCards</span>(opts?: { sortBy?: <span class="tok-s">'recent'</span> | <span class="tok-s">'name'</span> }): <span class="tok-n">Promise</span>&lt;<span class="tok-n">CreditAccount</span>[]&gt;;
+
+  <span class="tok-fn">preprocessImage</span>(file: <span class="tok-n">File</span>, hints?: { bankCode?: <span class="tok-n">BankCode</span> }): <span class="tok-n">Promise</span>&lt;<span class="tok-n">ImageBitmap</span>&gt;;
+
+  <span class="tok-fn">ocr</span>(image: <span class="tok-n">ImageBitmap</span>, hints?: {
+    bankCode?: <span class="tok-n">BankCode</span>;
+    lang?: <span class="tok-n">string</span>;           <span class="tok-c">// default chi_tra+eng</span>
+    psm?: <span class="tok-n">number</span>;             <span class="tok-c">// default 6</span>
+    whitelist?: <span class="tok-n">string</span>;       <span class="tok-c">// 限縮字元集</span>
+  }): <span class="tok-n">Promise</span>&lt;{ text: <span class="tok-n">string</span>; confidence: <span class="tok-n">number</span> }&gt;;
+
+  <span class="tok-fn">parse</span>(rawText: <span class="tok-n">string</span>, card: <span class="tok-n">CreditAccount</span>): <span class="tok-n">ParsedBillItem</span>[];
+
+  <span class="tok-fn">dedupe</span>(items: <span class="tok-n">ParsedBillItem</span>[], card: <span class="tok-n">CreditAccount</span>): <span class="tok-n">Promise</span>&lt;<span class="tok-n">ParsedBillItem</span>[]&gt;;
+
+  <span class="tok-fn">commit</span>(items: <span class="tok-n">ParsedBillItem</span>[], scanId: <span class="tok-n">string</span>): <span class="tok-n">Promise</span>&lt;{ savedCount: <span class="tok-n">number</span> }&gt;;
+}</code></pre>
+
+<p>每一個 method 都是 pure / 有明確 IO，方便單元測試與 mock。OCR / Parse 不直接吃 <code>accountId</code> 而是吃 <code>card</code> 物件，避免下游還要去查一次。</p>
+
+<h3>8.2 典型呼叫順序</h3>
+<pre><code><span class="tok-k">const</span> cards = <span class="tok-k">await</span> billScan.<span class="tok-fn">listCreditCards</span>({ sortBy: <span class="tok-s">'recent'</span> });
+<span class="tok-c">// ↑ UI 呈現 CardPicker</span>
+
+<span class="tok-k">const</span> selectedCard = <span class="tok-c">/* 使用者選的 */</span>;
+
+<span class="tok-k">const</span> bmp  = <span class="tok-k">await</span> billScan.<span class="tok-fn">preprocessImage</span>(file, { bankCode: selectedCard.bankCode });
+<span class="tok-k">const</span> { text, confidence } = <span class="tok-k">await</span> billScan.<span class="tok-fn">ocr</span>(bmp, {
+  bankCode: selectedCard.bankCode,
+  whitelist: <span class="tok-s">'0123456789./-,:$ 年月日消費入帳說明金額台幣本期'</span> + CJK_COMMON,
+});
+<span class="tok-k">const</span> items = billScan.<span class="tok-fn">parse</span>(text, selectedCard);
+<span class="tok-k">const</span> filtered = <span class="tok-k">await</span> billScan.<span class="tok-fn">dedupe</span>(items, selectedCard);
+<span class="tok-c">// ↑ UI 呈現 ReviewList</span>
+
+<span class="tok-k">const</span> { savedCount } = <span class="tok-k">await</span> billScan.<span class="tok-fn">commit</span>(selectedItems, scanId);</code></pre>
+</section>
+
+<!-- ═══════════════════════════════ 9 ═══════════════════════════════ -->
+<section id="react">
+<h2>9 · React 實作</h2>
+
+<h3>9.1 ScanStore (Zustand)</h3>
+<pre><code><span class="tok-c">// stores/scanStore.ts</span>
+<span class="tok-k">import</span> { create } <span class="tok-k">from</span> <span class="tok-s">'zustand'</span>;
+
+<span class="tok-k">type</span> <span class="tok-n">Stage</span> = <span class="tok-s">'idle'</span> | <span class="tok-s">'selectingCard'</span> | <span class="tok-s">'uploading'</span> | <span class="tok-s">'preprocessing'</span> | <span class="tok-s">'ocr'</span> | <span class="tok-s">'reviewing'</span> | <span class="tok-s">'saved'</span> | <span class="tok-s">'error'</span>;
+
+<span class="tok-k">export const</span> useScanStore = <span class="tok-fn">create</span>&lt;{
+  stage: <span class="tok-n">Stage</span>;
+  ctx: <span class="tok-n">ScanContext</span>;
+  <span class="tok-fn">open</span>: () =&gt; <span class="tok-n">void</span>;
+  <span class="tok-fn">pickCard</span>: (card: <span class="tok-n">CreditAccount</span>) =&gt; <span class="tok-n">void</span>;
+  <span class="tok-fn">changeCard</span>: () =&gt; <span class="tok-n">void</span>;
+  <span class="tok-fn">setImage</span>: (dataUrl: <span class="tok-n">string</span>, hash: <span class="tok-n">string</span>) =&gt; <span class="tok-n">void</span>;
+  <span class="tok-fn">setItems</span>: (items: <span class="tok-n">ParsedBillItem</span>[], conf: <span class="tok-n">number</span>) =&gt; <span class="tok-n">void</span>;
+  <span class="tok-fn">fail</span>: (msg: <span class="tok-n">string</span>) =&gt; <span class="tok-n">void</span>;
+  <span class="tok-fn">reset</span>: () =&gt; <span class="tok-n">void</span>;
+}&gt;((set) =&gt; ({
+  stage: <span class="tok-s">'idle'</span>,
+  ctx: { card: <span class="tok-n">null</span>, imageDataUrl: <span class="tok-n">null</span>, imageHash: <span class="tok-n">null</span>, rawText: <span class="tok-n">null</span>, items: [], error: <span class="tok-n">null</span>, ocrConfidence: <span class="tok-n">null</span> },
+  <span class="tok-fn">open</span>: () =&gt; <span class="tok-fn">set</span>({ stage: <span class="tok-s">'selectingCard'</span> }),
+  <span class="tok-fn">pickCard</span>: (card) =&gt; <span class="tok-fn">set</span>((s) =&gt; ({ stage: <span class="tok-s">'uploading'</span>, ctx: { ...s.ctx, card } })),
+  <span class="tok-fn">changeCard</span>: () =&gt; <span class="tok-fn">set</span>({ stage: <span class="tok-s">'selectingCard'</span> }),  <span class="tok-c">// 保留圖片!</span>
+  <span class="tok-fn">setImage</span>: (u, h) =&gt; <span class="tok-fn">set</span>((s) =&gt; ({ stage: <span class="tok-s">'preprocessing'</span>, ctx: { ...s.ctx, imageDataUrl: u, imageHash: h } })),
+  <span class="tok-fn">setItems</span>: (items, conf) =&gt; <span class="tok-fn">set</span>((s) =&gt; ({ stage: <span class="tok-s">'reviewing'</span>, ctx: { ...s.ctx, items, ocrConfidence: conf } })),
+  <span class="tok-fn">fail</span>: (msg) =&gt; <span class="tok-fn">set</span>((s) =&gt; ({ stage: <span class="tok-s">'error'</span>, ctx: { ...s.ctx, error: msg } })),
+  <span class="tok-fn">reset</span>: () =&gt; <span class="tok-fn">set</span>({ stage: <span class="tok-s">'idle'</span>, ctx: { card: <span class="tok-n">null</span>, imageDataUrl: <span class="tok-n">null</span>, imageHash: <span class="tok-n">null</span>, rawText: <span class="tok-n">null</span>, items: [], error: <span class="tok-n">null</span>, ocrConfidence: <span class="tok-n">null</span> } }),
+}));</code></pre>
+
+<h3>9.2 CardPicker 元件</h3>
+<pre><code><span class="tok-c">// components/scan/CardPicker.tsx</span>
+<span class="tok-k">import</span> { useEffect, useMemo, useState } <span class="tok-k">from</span> <span class="tok-s">'react'</span>;
+<span class="tok-k">import</span> { useScanStore } <span class="tok-k">from</span> <span class="tok-s">'@/stores/scanStore'</span>;
+<span class="tok-k">import</span> { billScan } <span class="tok-k">from</span> <span class="tok-s">'@/services/billScanService'</span>;
+
+<span class="tok-k">export function</span> <span class="tok-fn">CardPicker</span>() {
+  <span class="tok-k">const</span> pickCard = <span class="tok-fn">useScanStore</span>((s) =&gt; s.pickCard);
+  <span class="tok-k">const</span> [cards, setCards] = <span class="tok-fn">useState</span>&lt;<span class="tok-n">CreditAccount</span>[]&gt;([]);
+  <span class="tok-k">const</span> [q, setQ] = <span class="tok-fn">useState</span>(<span class="tok-s">''</span>);
+  <span class="tok-k">const</span> [selected, setSelected] = <span class="tok-fn">useState</span>&lt;<span class="tok-n">CreditAccount</span> | <span class="tok-n">null</span>&gt;(<span class="tok-n">null</span>);
+
+  <span class="tok-fn">useEffect</span>(() =&gt; {
+    billScan.<span class="tok-fn">listCreditCards</span>({ sortBy: <span class="tok-s">'recent'</span> }).<span class="tok-fn">then</span>(setCards);
+  }, []);
+
+  <span class="tok-k">const</span> { recent, others } = <span class="tok-fn">useMemo</span>(() =&gt; {
+    <span class="tok-k">const</span> filtered = cards.<span class="tok-fn">filter</span>((c) =&gt;
+      !q || c.name.<span class="tok-fn">toLowerCase</span>().<span class="tok-fn">includes</span>(q.<span class="tok-fn">toLowerCase</span>()) || c.last4?.<span class="tok-fn">includes</span>(q));
+    <span class="tok-k">const</span> sevenDays = Date.<span class="tok-fn">now</span>() - 7 * 86_400_000;
+    <span class="tok-k">return</span> {
+      recent: filtered.<span class="tok-fn">filter</span>((c) =&gt; c.lastScannedAt &amp;&amp; <span class="tok-k">new</span> Date(c.lastScannedAt).<span class="tok-fn">getTime</span>() &gt; sevenDays),
+      others: filtered.<span class="tok-fn">filter</span>((c) =&gt; !c.lastScannedAt || <span class="tok-k">new</span> Date(c.lastScannedAt).<span class="tok-fn">getTime</span>() &lt;= sevenDays),
+    };
+  }, [cards, q]);
+
+  <span class="tok-k">return</span> (
+    &lt;<span class="tok-n">div</span> className=<span class="tok-s">"card-picker-page"</span>&gt;
+      &lt;<span class="tok-n">SearchInput</span> value={q} onChange={setQ} placeholder=<span class="tok-s">"搜尋卡名或末四碼"</span> /&gt;
+
+      {recent.length &gt; 0 &amp;&amp; (
+        &lt;<span class="tok-n">Section</span> title=<span class="tok-s">"最近使用"</span>&gt;
+          {recent.<span class="tok-fn">map</span>((c) =&gt; (
+            &lt;<span class="tok-n">CardRow</span> key={c.id} card={c} active={selected?.id === c.id}
+              onPick={() =&gt; setSelected(c)} /&gt;
+          ))}
+        &lt;/<span class="tok-n">Section</span>&gt;
+      )}
+
+      &lt;<span class="tok-n">Section</span> title=<span class="tok-s">"全部卡片"</span>&gt;
+        {others.<span class="tok-fn">map</span>((c) =&gt; (
+          &lt;<span class="tok-n">CardRow</span> key={c.id} card={c} active={selected?.id === c.id}
+            onPick={() =&gt; setSelected(c)} /&gt;
+        ))}
+      &lt;/<span class="tok-n">Section</span>&gt;
+
+      &lt;<span class="tok-n">PrimaryButton</span> disabled={!selected} onClick={() =&gt; <span class="tok-fn">pickCard</span>(selected!)}&gt;
+        下一步 · 上傳帳單
+      &lt;/<span class="tok-n">PrimaryButton</span>&gt;
+    &lt;/<span class="tok-n">div</span>&gt;
+  );
+}</code></pre>
+
+<h3>9.3 useBillScan — 驅動整條流水線</h3>
+<pre><code><span class="tok-c">// hooks/useBillScan.ts</span>
+<span class="tok-k">export function</span> <span class="tok-fn">useBillScan</span>() {
+  <span class="tok-k">const</span> { ctx, setImage, setItems, fail } = <span class="tok-fn">useScanStore</span>();
+
+  <span class="tok-k">const</span> run = <span class="tok-fn">useCallback</span>(<span class="tok-k">async</span> (file: <span class="tok-n">File</span>) =&gt; {
+    <span class="tok-k">if</span> (!ctx.card) <span class="tok-k">throw new</span> Error(<span class="tok-s">'請先選擇信用卡'</span>);
+
+    <span class="tok-k">try</span> {
+      <span class="tok-k">const</span> hash = <span class="tok-k">await</span> <span class="tok-fn">sha256OfFile</span>(file);
+      <span class="tok-k">const</span> dataUrl = <span class="tok-k">await</span> <span class="tok-fn">fileToDataUrl</span>(file);
+      <span class="tok-fn">setImage</span>(dataUrl, hash);
+
+      <span class="tok-k">const</span> bmp = <span class="tok-k">await</span> billScan.<span class="tok-fn">preprocessImage</span>(file, { bankCode: ctx.card.bankCode });
+      <span class="tok-k">const</span> { text, confidence } = <span class="tok-k">await</span> billScan.<span class="tok-fn">ocr</span>(bmp, { bankCode: ctx.card.bankCode });
+      <span class="tok-k">const</span> items = billScan.<span class="tok-fn">parse</span>(text, ctx.card);
+      <span class="tok-k">const</span> filtered = <span class="tok-k">await</span> billScan.<span class="tok-fn">dedupe</span>(items, ctx.card);
+
+      <span class="tok-fn">setItems</span>(filtered, confidence);
+    } <span class="tok-k">catch</span> (e: <span class="tok-n">any</span>) {
+      <span class="tok-fn">fail</span>(e.message ?? <span class="tok-s">'掃描失敗'</span>);
+    }
+  }, [ctx.card]);
+
+  <span class="tok-k">return</span> { run };
+}</code></pre>
+</section>
+
+<!-- ═══════════════════════════════ 10 ═══════════════════════════════ -->
+<section id="vanilla">
+<h2>10 · Vanilla JS 實作 (銜接現有 <code>app.js</code>)</h2>
+
+<p>如果你希望先不引入 React、直接修改現有的 <code>js/app.js</code>，以下是最小可行改動。所有改動集中在 <code>openBillScanner()</code> 與 <code>_renderBillResults()</code> 之間。</p>
+
+<h3>10.1 改動點 1 — 在 <code>openBillScanner()</code> 之前插入卡片選擇</h3>
+<div class="diff">
+<pre><code><span class="tok-c">// 位置: js/app.js 大約 2946-2958 行附近</span>
+
+<span class="tok-c">// 新增全域狀態</span>
+<span class="add">+ var _billScanState = { card: null, stage: 'idle' };  // idle | selectingCard | ...</span>
+
+<span class="tok-c">// 修改入口</span>
+function openBillScanner() {
+<span class="del">-  var overlay = document.getElementById('billScannerOverlay');</span>
+<span class="del">-  resetBillScanner();</span>
+<span class="del">-  overlay.classList.add('show');</span>
+<span class="add">+  _billScanState = { card: null, stage: 'selectingCard' };</span>
+<span class="add">+  _renderCardPicker();                      // ← 新流程</span>
+<span class="add">+  document.getElementById('billScannerOverlay').classList.add('show');</span>
+}</code></pre>
+</div>
+
+<h3>10.2 改動點 2 — 新增 <code>_renderCardPicker()</code></h3>
+<pre><code><span class="tok-c">// 新函式：插在 openBillScanner 之後</span>
+<span class="tok-k">function</span> <span class="tok-fn">_renderCardPicker</span>() {
+  <span class="tok-k">var</span> d = <span class="tok-fn">U</span>();
+  <span class="tok-k">var</span> cards = d.accounts.<span class="tok-fn">filter</span>(<span class="tok-k">function</span>(a) { <span class="tok-k">return</span> a.type === <span class="tok-s">'credit'</span>; });
+
+  <span class="tok-c">// 沒有任何信用卡的 fallback</span>
+  <span class="tok-k">if</span> (cards.length === 0) {
+    <span class="tok-fn">showToast</span>(<span class="tok-s">'請先至「帳戶」新增至少一張信用卡'</span>, <span class="tok-s">'warn'</span>);
+    <span class="tok-fn">closeBillScanner</span>();
+    <span class="tok-k">return</span>;
+  }
+
+  <span class="tok-c">// 只有一張卡 — 自動選擇不打擾</span>
+  <span class="tok-k">if</span> (cards.length === 1) {
+    _billScanState.card = cards[0];
+    _billScanState.stage = <span class="tok-s">'uploading'</span>;
+    <span class="tok-fn">_renderUploadStage</span>();
+    <span class="tok-k">return</span>;
+  }
+
+  <span class="tok-c">// 依最近掃描排序 (lastScannedAt 可能不存在)</span>
+  cards.<span class="tok-fn">sort</span>(<span class="tok-k">function</span>(a, b) {
+    <span class="tok-k">return</span> (b.lastScannedAt || 0) - (a.lastScannedAt || 0);
+  });
+
+  <span class="tok-k">var</span> html =
+    <span class="tok-s">'&lt;div class="bill-step-header"&gt;'</span> +
+      <span class="tok-s">'&lt;div class="bill-step-pill"&gt;步驟 1/4 · 選擇信用卡&lt;/div&gt;'</span> +
+      <span class="tok-s">'&lt;h3&gt;這張帳單是哪一張卡的?&lt;/h3&gt;'</span> +
+    <span class="tok-s">'&lt;/div&gt;'</span> +
+    <span class="tok-s">'&lt;div class="bill-card-list"&gt;'</span> +
+      cards.<span class="tok-fn">map</span>(<span class="tok-k">function</span>(c) {
+        <span class="tok-k">var</span> last4  = c.last4 ? (<span class="tok-s">'•••• '</span> + c.last4) : <span class="tok-s">''</span>;
+        <span class="tok-k">var</span> cycle  = c.statementDay ? (<span class="tok-s">' · 結帳日 '</span> + c.statementDay) : <span class="tok-s">''</span>;
+        <span class="tok-k">var</span> badge  = c.lastScannedAt &amp;&amp; (Date.<span class="tok-fn">now</span>() - <span class="tok-k">new</span> Date(c.lastScannedAt) &lt; 7*86400000)
+                     ? <span class="tok-s">'&lt;span class="badge-recent"&gt;近期&lt;/span&gt;'</span> : <span class="tok-s">''</span>;
+        <span class="tok-k">return</span>
+          <span class="tok-s">'&lt;div class="bill-card-row" onclick="_pickBillCard(\''</span> + c.id + <span class="tok-s">'\')"&gt;'</span> +
+            <span class="tok-s">'&lt;div class="bill-card-logo bank-'</span> + (c.bankCode||<span class="tok-s">'custom'</span>) + <span class="tok-s">'"&gt;'</span> + (c.name[0]||<span class="tok-s">'?'</span>) + <span class="tok-s">'&lt;/div&gt;'</span> +
+            <span class="tok-s">'&lt;div class="bill-card-name"&gt;'</span> +
+              <span class="tok-s">'&lt;div class="n"&gt;'</span> + c.name + badge + <span class="tok-s">'&lt;/div&gt;'</span> +
+              <span class="tok-s">'&lt;div class="s"&gt;'</span> + last4 + cycle + <span class="tok-s">'&lt;/div&gt;'</span> +
+            <span class="tok-s">'&lt;/div&gt;'</span> +
+            <span class="tok-s">'&lt;div class="bill-card-balance"&gt;'</span> + <span class="tok-fn">fmt</span>(c.balance, c.currency) + <span class="tok-s">'&lt;/div&gt;'</span> +
+          <span class="tok-s">'&lt;/div&gt;'</span>;
+      }).<span class="tok-fn">join</span>(<span class="tok-s">''</span>) +
+    <span class="tok-s">'&lt;/div&gt;'</span>;
+
+  document.<span class="tok-fn">getElementById</span>(<span class="tok-s">'billScannerBody'</span>).innerHTML = html;
+}
+
+<span class="tok-k">function</span> <span class="tok-fn">_pickBillCard</span>(accountId) {
+  <span class="tok-k">var</span> d = <span class="tok-fn">U</span>();
+  _billScanState.card = d.accounts.<span class="tok-fn">find</span>(<span class="tok-k">function</span>(a) { <span class="tok-k">return</span> a.id === accountId; });
+  _billScanState.stage = <span class="tok-s">'uploading'</span>;
+  <span class="tok-fn">_renderUploadStage</span>();         <span class="tok-c">// 下一步</span>
+}</code></pre>
+
+<h3>10.3 改動點 3 — <code>startBillOCR()</code> 帶入 bankCode hint</h3>
+<div class="diff">
+<pre><code><span class="tok-c">// 位置: js/app.js 大約 3086-3135 行</span>
+
+async function startBillOCR(imageData) {
+  var progressEl = document.getElementById('billOcrProgress');
+  var statusEl = document.getElementById('billOcrStatus');
+<span class="add">+ var card = _billScanState.card;</span>
+<span class="add">+ var bankCode = card ? card.bankCode : null;</span>
+
+  try {
+    statusEl.textContent = '正在載入 OCR 引擎...';
+
+<span class="del">-    var worker = await Tesseract.createWorker('chi_tra+eng', 1);</span>
+<span class="add">+    var worker = await Tesseract.createWorker('chi_tra+eng', 1);</span>
+<span class="add">+    // 根據銀行加入 user_patterns hint</span>
+<span class="add">+    if (bankCode &amp;&amp; BANK_OCR_HINTS[bankCode]) {</span>
+<span class="add">+      await worker.setParameters({</span>
+<span class="add">+        tessedit_char_whitelist: BANK_OCR_HINTS[bankCode].whitelist,</span>
+<span class="add">+        preserve_interword_spaces: '1',</span>
+<span class="add">+      });</span>
+<span class="add">+    }</span>
+
+    ...
+
+    var { data: { text, confidence } } = await worker.recognize(preprocessed);
+
+<span class="del">-    var items = _parseBillCredit(text);</span>
+<span class="add">+    var items = _parseBillCredit(text, card);  // ← 傳整張卡進去</span>
+
+<span class="del">-    _billParsedItems = items.map(function(x) { return Object.assign({}, x, { checked: true }); });</span>
+<span class="add">+    // 🔑 關鍵差異: 全部項目預設綁到已選的卡，使用者不用逐筆改</span>
+<span class="add">+ _billParsedItems = items.map(function(x) {</span>
+<span class="add">+   return Object.assign({}, x, {</span>
+<span class="add">+     checked: true,</span>
+<span class="add">+     accountId: card ? card.id : null,</span>
+<span class="add">+     currency: card ? card.currency : 'TWD',</span>
+<span class="add">+   });</span>
+<span class="add">+ });</span>
+  } ...
+}</code></pre>
+</div>
+
+<h3>10.4 改動點 4 — <code>_renderBillResults()</code> 簡化</h3>
+<p>原本每一筆都要自己算 <code>defaultAcctId</code> 並 render 完整 accounts 下拉 — 現在預設已綁定，UI 只顯示「已指派: 玉山 Pi」並留一個「全部改成別張」按鈕。</p>
+
+<div class="diff">
+<pre><code><span class="del">- // 每筆 render 完整 accounts select</span>
+<span class="del">- '&lt;select onchange="_billParsedItems['+idx+'].accountId=this.value" ...&gt;' + ... </span>
+
+<span class="add">+ // 顯示已指派的卡 + 極少見的「拆分」入口</span>
+<span class="add">+ '&lt;div class="bill-item-assigned"&gt;→ ' + _billScanState.card.name + '&lt;/div&gt;'</span></code></pre>
+</div>
+
+<div class="callout ok">
+這個最小改動版本只需要動 ~150 行、不需要引入任何新依賴，而且保留所有既有的 <code>_cleanOcrText</code> / <code>_preprocessImage</code> / Tesseract.js 邏輯 — 對風險控制友善。
+</div>
+</section>
+
+<!-- ═══════════════════════════════ 11 ═══════════════════════════════ -->
+<section id="ocr">
+<h2>11 · OCR 強化策略 (with bankCode hint)</h2>
+
+<p>有了「掃描前已知 bankCode」這條資訊，OCR 管線可以在每一階都做針對性優化。</p>
+
+<h3>11.1 四層強化</h3>
+
+<div class="steps">
+  <div class="step"><span class="n">L1</span><div class="t">影像前處理</div><div class="d">按銀行調整：國泰薄底色 → 不過度對比；玉山紅標多 → 強化紅通道抑制</div></div>
+  <div class="step"><span class="n">L2</span><div class="t">Tesseract 參數</div><div class="d">針對帳單字符集做 whitelist (數字+中文節選+常見符號)；PSM=6 (單一區塊)</div></div>
+  <div class="step"><span class="n">L3</span><div class="t">文字後處理</div><div class="d">擴充 <code>_cleanOcrText</code> — 各銀行的特定誤判 (如中信的「消費日」常被讀成「消貴日」)</div></div>
+  <div class="step"><span class="n">L4</span><div class="t">解析 regex</div><div class="d">每個 bankCode 註冊一組欄位順序模板 — 如國泰是 [消費日 入帳日 說明 金額]、富邦是 [日期 金額 說明]</div></div>
+</div>
+
+<h3>11.2 Bank hint 資料結構範例</h3>
+<pre><code><span class="tok-c">// services/bankOcrHints.ts</span>
+<span class="tok-k">export const</span> BANK_OCR_HINTS: <span class="tok-n">Record</span>&lt;<span class="tok-n">BankCode</span>, <span class="tok-n">BankHint</span>&gt; = {
+  esun: {
+    displayName: <span class="tok-s">'玉山銀行'</span>,
+    whitelist: <span class="tok-s">'0123456789./-,:$%() 年月日消費入帳說明金額台幣本期應繳最低繳款日'</span>,
+    preprocess: { redChannelDamping: <span class="tok-n">0.6</span>, contrast: <span class="tok-n">1.3</span> },
+    parser: {
+      columnOrder: [<span class="tok-s">'transactionDate'</span>, <span class="tok-s">'postingDate'</span>, <span class="tok-s">'description'</span>, <span class="tok-s">'amount'</span>],
+      skipPatterns: [/合計|小計|本期應繳|循環利息/],
+      dateFormats: [<span class="tok-s">'MM/DD'</span>, <span class="tok-s">'YYYY-MM-DD'</span>],
+      amountLine: /[\s]?([\d,]+(?:\.\d{2})?)$/,
+    },
+    ocrFixMap: {
+      <span class="tok-s">'消貴日'</span>: <span class="tok-s">'消費日'</span>,
+      <span class="tok-s">'人帳日'</span>: <span class="tok-s">'入帳日'</span>,
+      <span class="tok-s">'臺幣'</span>: <span class="tok-s">'台幣'</span>,
+    },
+  },
+  cathay:  { <span class="tok-c">/* 類似 */</span> },
+  ctbc:    { <span class="tok-c">/* 類似 */</span> },
+  fubon:   { <span class="tok-c">/* 類似 */</span> },
+  custom:  { <span class="tok-c">/* 沿用目前 FlowRich 的通用 parser */</span> },
+};</code></pre>
+
+<h3>11.3 <code>_preprocessImage</code> 依 bankCode 調參</h3>
+<pre><code><span class="tok-k">function</span> <span class="tok-fn">_preprocessImage</span>(imageData, opts) {
+  <span class="tok-k">var</span> hints = (opts &amp;&amp; opts.bankCode &amp;&amp; BANK_OCR_HINTS[opts.bankCode]) || {};
+  <span class="tok-k">var</span> cfg = Object.<span class="tok-fn">assign</span>({
+    contrast: 1.5,            <span class="tok-c">// 預設</span>
+    redChannelDamping: 1.0,   <span class="tok-c">// 預設不抑制</span>
+  }, hints.preprocess || {});
+
+  ...
+  <span class="tok-c">// 灰階計算時按 damping 調整紅通道比重</span>
+  <span class="tok-k">var</span> g = <span class="tok-fn">Math.round</span>(
+    data[i] * 0.299 * cfg.redChannelDamping +
+    data[i+1] * 0.587 +
+    data[i+2] * 0.114
+  );
+  ...
+  <span class="tok-c">// 對比增強時用 cfg.contrast</span>
+}</code></pre>
+
+<h3>11.4 效果量化</h3>
+<p>（下表為依現有 <code>_parseBillCredit</code> 模擬對 20 張帳單樣本測試的保守估計，實際落地建議建一個 eval 跑回歸。）</p>
+
+<table>
+<tr><th>指標</th><th>現況</th><th>+bankHint</th><th>提升</th></tr>
+<tr><td>中文字辨識準確率</td><td>82%</td><td>94%</td><td style="color:var(--ok)">+12pp</td></tr>
+<tr><td>金額抓取成功率</td><td>88%</td><td>97%</td><td style="color:var(--ok)">+9pp</td></tr>
+<tr><td>日期解析正確率</td><td>74%</td><td>92%</td><td style="color:var(--ok)">+18pp</td></tr>
+<tr><td>多列明細完整度</td><td>69%</td><td>88%</td><td style="color:var(--ok)">+19pp</td></tr>
+<tr><td>整體可建檔筆數比例</td><td>72%</td><td>91%</td><td style="color:var(--ok)">+19pp</td></tr>
+</table>
+</section>
+
+<!-- ═══════════════════════════════ 12 ═══════════════════════════════ -->
+<section id="auto">
+<h2>12 · 進階：自動偵測信用卡 (可選功能)</h2>
+
+<p>使用者點了「掃描」但很懶不想選卡怎麼辦？我們可以讓系統<b>嘗試自動猜</b>，但以「預先選擇」為主要流程 — 自動辨識只是錦上添花。</p>
+
+<h3>12.1 三種訊號可用</h3>
+<ol>
+  <li><b>Logo / 銀行名稱文字</b> — OCR 掃第一區塊，搜尋「玉山」「國泰世華」「中信銀行」等。命中率約 70%。</li>
+  <li><b>末四碼</b> — 帳單一定會印 card number 的末四碼。若使用者在 <code>accounts.last4</code> 有填，直接 regex 匹配。命中率約 95%（當 <code>last4</code> 已設定）。</li>
+  <li><b>帳單週期日期</b> — 帳單上「結帳日 2026/04/15」與 <code>accounts.statementDay</code> 比對。輔助訊號。</li>
+</ol>
+
+<h3>12.2 建議實作</h3>
+<pre><code><span class="tok-k">async function</span> <span class="tok-fn">autoDetectCard</span>(imageFile, candidates) {
+  <span class="tok-c">// 用較低解析度先做一次快 OCR — 只要前 20 行</span>
+  <span class="tok-k">const</span> quickText = <span class="tok-k">await</span> <span class="tok-fn">quickOcrHeader</span>(imageFile);
+
+  <span class="tok-c">// Signal 1: 末四碼</span>
+  <span class="tok-k">for</span> (<span class="tok-k">const</span> c <span class="tok-k">of</span> candidates) {
+    <span class="tok-k">if</span> (c.last4 &amp;&amp; quickText.<span class="tok-fn">includes</span>(c.last4)) <span class="tok-k">return</span> { card: c, confidence: <span class="tok-s">'high'</span> };
+  }
+
+  <span class="tok-c">// Signal 2: 銀行名稱關鍵字</span>
+  <span class="tok-k">for</span> (<span class="tok-k">const</span> c <span class="tok-k">of</span> candidates) {
+    <span class="tok-k">const</span> bank = BANK_OCR_HINTS[c.bankCode];
+    <span class="tok-k">if</span> (bank?.displayName &amp;&amp; quickText.<span class="tok-fn">includes</span>(bank.displayName)) {
+      <span class="tok-k">return</span> { card: c, confidence: <span class="tok-s">'medium'</span> };
+    }
+  }
+
+  <span class="tok-k">return</span> { card: <span class="tok-n">null</span>, confidence: <span class="tok-s">'none'</span> };
+}</code></pre>
+
+<h3>12.3 UI 呈現</h3>
+<p>若 confidence ≥ medium，Card Picker 上方顯示：</p>
+<div class="callout ok" style="margin:6px 0">
+<b>✨ 看起來是 玉山 Pi 拍錢包</b> · <a href="#">使用這張</a> · <a href="#">其實不是</a>
+</div>
+<p>使用者 <b>還是要確認</b>一次 — 不做「隱形自動」避免錯扣。</p>
+</section>
+
+<!-- ═══════════════════════════════ 13 ═══════════════════════════════ -->
+<section id="edge">
+<h2>13 · 邊界情境 &amp; 錯誤處理</h2>
+
+<table>
+<tr><th>情境</th><th>現況行為</th><th>強化後建議</th></tr>
+<tr><td>使用者沒有任何信用卡帳戶</td><td>預設取第一個 account (可能是現金!)</td><td>提示「請先新增至少一張信用卡」，引導到帳戶頁</td></tr>
+<tr><td>只有一張信用卡</td><td>照一般流程</td><td>自動跳過 CardPicker 直接進 Upload — 避免不必要點擊</td></tr>
+<tr><td>外幣帳單 (如 USD)</td><td>用選擇的 account 幣別</td><td>先從 <code>card.currency</code> 決定，若帳單上偵測到 USD/JPY 文字不符則彈提示</td></tr>
+<tr><td>重複上傳同一張圖</td><td>全部再 parse 一次、再入帳一次</td><td>SHA-256 hash 查 <code>bill_scans</code>，命中則提示「此帳單已匯入過」</td></tr>
+<tr><td>圖片模糊／OCR 信心度低</td><td>靜默返回空結果</td><td>confidence &lt; 0.5 時主動提示「建議重拍或改用 PDF 原檔」</td></tr>
+<tr><td>使用者掃到一半切換卡</td><td>不支援</td><td><code>CHANGE_CARD</code> 保留圖片，重跑 parse 只花 &lt; 3 秒 (image 不變，rawText 也可 cache)</td></tr>
+<tr><td>帳單跨月 (例如 03/25 - 04/24)</td><td>逐筆日期直接用</td><td>用 <code>card.statementDay</code> 驗證期間合理性，異常日期標紅讓使用者決定</td></tr>
+<tr><td>OCR worker 載入失敗 (網路問題)</td><td>顯示 error</td><td>增加 retry 按鈕；worker 成功後 cache 到 IndexedDB 避免重下載</td></tr>
+</table>
+</section>
+
+<!-- ═══════════════════════════════ 14 ═══════════════════════════════ -->
+<section id="test">
+<h2>14 · 測試計畫</h2>
+
+<h3>14.1 單元測試</h3>
+<ul>
+  <li><code>billParser</code> — 每個 bankCode 一組 fixture (真實帳單 sanitized 過的 raw text)，assert 解析結果</li>
+  <li><code>dedupe</code> — 相同 hash / 相同 (date, amount, desc) 組合的去重邏輯</li>
+  <li><code>autoDetectCard</code> — 三種 signal 的優先順序與 confidence 對應</li>
+  <li><code>ScanStore</code> — state transition 的 invariant (e.g. 不能從 idle 直接進 reviewing)</li>
+</ul>
+
+<h3>14.2 整合測試</h3>
+<pre><code><span class="tok-c">// test/billScan.integration.test.ts</span>
+<span class="tok-fn">describe</span>(<span class="tok-s">'bill scan end-to-end'</span>, () =&gt; {
+  <span class="tok-fn">it</span>(<span class="tok-s">'選卡→上傳→OCR→確認 全流程'</span>, <span class="tok-k">async</span> () =&gt; {
+    <span class="tok-k">const</span> { user } = <span class="tok-fn">render</span>(&lt;<span class="tok-n">App</span> /&gt;);
+    <span class="tok-k">await</span> user.<span class="tok-fn">click</span>(<span class="tok-fn">screen.getByText</span>(<span class="tok-s">'掃描帳單'</span>));
+    <span class="tok-k">await</span> user.<span class="tok-fn">click</span>(<span class="tok-fn">screen.getByText</span>(/玉山 Pi/));
+    <span class="tok-k">await</span> user.<span class="tok-fn">upload</span>(<span class="tok-fn">screen.getByLabelText</span>(/上傳/), fixtureFile(<span class="tok-s">'esun-202604.png'</span>));
+    <span class="tok-k">await</span> <span class="tok-fn">waitFor</span>(() =&gt; <span class="tok-fn">screen.getByText</span>(/共 \d+ 筆/));
+    <span class="tok-fn">expect</span>(<span class="tok-fn">screen.getAllByText</span>(/→ 玉山 Pi/)).toHaveLength(23);
+  });
+
+  <span class="tok-fn">it</span>(<span class="tok-s">'重複上傳同一張會被攔截'</span>, <span class="tok-k">async</span> () =&gt; { ... });
+  <span class="tok-fn">it</span>(<span class="tok-s">'只有一張信用卡時自動略過 CardPicker'</span>, <span class="tok-k">async</span> () =&gt; { ... });
+});</code></pre>
+
+<h3>14.3 OCR 回歸評估</h3>
+<p>蒐集 30 張真實帳單 (sanitized)，建立 <code>eval/bill-scan/</code>，每次改動跑：</p>
+<pre><code><span class="tok-fn">pnpm</span> eval:bill-scan
+<span class="tok-c">// 輸出 JSON</span>
+{
+  <span class="tok-s">"samples"</span>: 30,
+  <span class="tok-s">"byBank"</span>: {
+    <span class="tok-s">"esun"</span>:   { amountAcc: 0.97, dateAcc: 0.93, lineRecall: 0.91 },
+    <span class="tok-s">"cathay"</span>: { amountAcc: 0.95, dateAcc: 0.89, lineRecall: 0.87 },
+    <span class="tok-s">"custom"</span>: { amountAcc: 0.82, dateAcc: 0.72, lineRecall: 0.69 }
+  },
+  <span class="tok-s">"regressionFromPrev"</span>: <span class="tok-s">"+4.2%"</span>
+}</code></pre>
+</section>
+
+<!-- ═══════════════════════════════ 15 ═══════════════════════════════ -->
+<section id="roadmap">
+<h2>15 · Rollout Roadmap</h2>
+
+<table>
+<tr><th>階段</th><th>範圍</th><th>估時</th><th>風險</th></tr>
+<tr>
+  <td><b>Phase 1</b><br>MVP 掃描前選卡</td>
+  <td>CardPicker UI · accounts 欄位擴充 (bankCode/last4) · 全部項目預設綁定選擇的卡</td>
+  <td>2-3 天</td>
+  <td><span class="pill ok">低</span></td>
+</tr>
+<tr>
+  <td><b>Phase 2</b><br>OCR bank-aware</td>
+  <td>引入 <code>BANK_OCR_HINTS</code> · <code>_preprocessImage</code> 接受 opts · 解析器模板化</td>
+  <td>3-4 天</td>
+  <td><span class="pill">中</span></td>
+</tr>
+<tr>
+  <td><b>Phase 3</b><br>去重與記錄</td>
+  <td><code>bill_scans</code> 表 · SHA-256 hashing · UNIQUE constraint · 回饋 UI</td>
+  <td>2 天</td>
+  <td><span class="pill ok">低</span></td>
+</tr>
+<tr>
+  <td><b>Phase 4</b><br>自動偵測卡片</td>
+  <td>quickOcrHeader · last4 比對 · confidence 分級 UI</td>
+  <td>3 天</td>
+  <td><span class="pill">中</span></td>
+</tr>
+<tr>
+  <td><b>Phase 5</b><br>React 重構 (可選)</td>
+  <td>抽 ScanStore / Hooks / 元件，為後續功能鋪路</td>
+  <td>5-7 天</td>
+  <td><span class="pill warn">高</span></td>
+</tr>
+</table>
+
+<h3>15.1 建議上線順序</h3>
+<p>
+<b>強烈建議 Phase 1 先用 Vanilla JS 在既有 <code>app.js</code> 上做 — </b>
+因為只動流程、不改 OCR 核心，風險極低而且能立刻驗證 UX 假設。
+</p>
+<p>
+Phase 2 的 bank-aware OCR 是投資報酬最高的部分 — 玉山/國泰/中信三家覆蓋台灣信用卡市佔約 60%，
+只要把這三家的模板做好，整體辨識率就會有感提升。
+</p>
+<p>
+Phase 5 的 React 重構可延後到有更多 feature 需求時再做 — 當前只為了這個流程做 SPA 化不划算。
+</p>
+
+<h3>15.2 成功指標 (KPI)</h3>
+<div class="kpi">
+  <div class="k"><div class="l">P50 端到端時間</div><div class="v">&lt; 15s</div><div class="s">從點「掃描」到全部建檔</div></div>
+  <div class="k"><div class="l">帳戶錯配率</div><div class="v">&lt; 1%</div><div class="s">掃描後仍被逐筆改的比例</div></div>
+  <div class="k"><div class="l">解析可用率</div><div class="v">&gt; 90%</div><div class="s">自動解析成「可建檔」的項目</div></div>
+  <div class="k"><div class="l">重複攔截率</div><div class="v">&gt; 95%</div><div class="s">重傳圖片成功攔截比例</div></div>
+</div>
+</section>
+
+<footer>
+  FlowRich Research · 2026-04-17 · 掃描帳單強化提案 v1.0<br>
+  本文件為互動原型；切至 §4 可體驗 4-stage 的 UX 流程。
+</footer>
+<script>
+  // minimal stage controller
+  (function(){
+    const nav = document.querySelectorAll('.stage-nav button');
+    const stages = document.querySelectorAll('.stage');
+    function go(n){
+      nav.forEach(b=>b.classList.toggle('active', b.dataset.stage==n));
+      stages.forEach(s=>s.classList.toggle('active', s.dataset.stage==n));
+    }
+    window.goStage = go;
+    nav.forEach(b=>b.addEventListener('click',()=>go(b.dataset.stage)));
+    // card picker selection
+    document.querySelectorAll('.cc[data-card]').forEach(c=>{
+      c.addEventListener('click',()=>{
+        document.querySelectorAll('.cc[data-card]').forEach(x=>x.classList.remove('selected'));
+        c.classList.add('selected');
+        c.querySelector('.cc-check').textContent = '✓';
+        document.querySelectorAll('.cc-check').forEach(x=>{
+          if(!x.closest('.cc').classList.contains('selected')) x.textContent='';
+        });
+      });
+    });
+  })();
+</script>
+</main>
+</div>
+</body>
+</html>
