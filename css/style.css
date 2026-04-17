@@ -304,7 +304,8 @@ tr:hover td{background:rgba(108,99,255,.03)}
 .drag-handle:hover{color:var(--text)}
 .drag-handle:active{cursor:grabbing}
 tr.dragging{opacity:.4;background:rgba(108,99,255,.1)}
-tr.drag-over td{border-top:2px solid var(--primary)!important}
+tr.drag-over-top td{border-top:3px solid var(--primary)!important;border-top-style:solid!important}
+tr.drag-over-bottom td{border-bottom:3px solid var(--primary)!important;border-bottom-style:solid!important}
 
 /* ============ 主題切換 ============ */
 .theme-toggle{
