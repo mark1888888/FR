@@ -80,6 +80,10 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>
       <span>財務規劃</span>
     </div>
+    <div class="nav-item" data-page="growth" onclick="switchPage('growth')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3 7h7l-5.5 4.5 2 7.5L12 17l-6.5 4 2-7.5L2 9h7z"/></svg>
+      <span>財務成長</span>
+    </div>
     <div class="nav-item" data-page="currency" onclick="switchPage('currency')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M15 9.354a4 4 0 10 0 5.292M12 7v1M12 16v1"/></svg>
       <span>匯率換算</span>
@@ -454,6 +458,18 @@
         <h3>幣圈新聞</h3>
         <div id="cryptoNewsContainer"><p style="color:var(--text3)">載入中...</p></div>
       </div>
+    </div>
+
+    <!-- ==================== 財務成長（遊戲化） ==================== -->
+    <div class="page" id="page-growth">
+      <div class="page-title">財務成長 <span style="font-size:13px;color:var(--text3);font-weight:400">RPG · 富爸爸訓練營</span></div>
+      <div class="tab-bar">
+        <button class="tab-btn active" onclick="switchGrowthTab('ratrace',this)">🏃 老鼠賽跑</button>
+        <button class="tab-btn" onclick="switchGrowthTab('achievements',this)">🏆 成就殿堂</button>
+        <button class="tab-btn" onclick="switchGrowthTab('personality',this)">🎭 性格診斷</button>
+        <button class="tab-btn" onclick="switchGrowthTab('simulator',this)">🔮 人生模擬器</button>
+      </div>
+      <div id="growthContent"></div>
     </div>
 
     <!-- ==================== 財務規劃 ==================== -->

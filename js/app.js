@@ -108,6 +108,9 @@ function defaultUserData() {
     recurring: [],       // 定期收/支 { id, type:'income'|'expense', name, amount, currency, category, accountId, dayOfMonth, note, active, lastGenerated:'YYYY-MM' }
     savingsGoals: [],    // 儲蓄目標 { id, name, emoji, targetAmount, currency, deadline, startDate, monthlyTarget, note, status:'active'|'done' }
     taxProfile: null,    // 稅務設定 { annualIncome, deductions, dividendIncome, filingStatus }
+    // v1.9.0 財務成長模組（遊戲化）
+    achievements: {},    // { achievementId: { unlockedAt, data } }
+    personality: null,   // { type, score, updatedAt }
     updated_at: new Date().toISOString()
   };
 }
@@ -315,7 +318,8 @@ function rerenderActivePage() {
       assets: renderAssets,
       analysis: renderAnalysis,
       invest: renderInvest,
-      planning: renderPlanning
+      planning: renderPlanning,
+      growth: renderGrowth
     };
     if (renders[pageId]) renders[pageId]();
   }
@@ -388,6 +392,7 @@ function U() {
   if (!DB.projects) DB.projects = [];
   if (!DB.recurring) DB.recurring = [];
   if (!DB.savingsGoals) DB.savingsGoals = [];
+  if (!DB.achievements) DB.achievements = {};
   if (!DB.updated_at) DB.updated_at = new Date().toISOString();
   if (!_legacyMigrated) {
     _legacyMigrated = true;
@@ -671,7 +676,8 @@ function switchPage(page) {
     transfer: renderTransfer,
     analysis: renderAnalysis,
     invest: renderInvest,
-    planning: renderPlanning
+    planning: renderPlanning,
+    growth: renderGrowth
   };
   if (renders[page]) renders[page]();
 }
@@ -2724,6 +2730,535 @@ function renderPlanTax() {
     '📌 提示：目前以收入頁的「薪資」類別視為薪資所得，「投資收益」視為股息（' + fmt(dividend, 'TWD') + '）。實際申報還需考量扶養親屬、保險費、醫療費等列舉扣除。</div>';
 
   document.getElementById('planContent').innerHTML = html;
+}
+
+// ============ 財務成長 / 遊戲化 (v1.9.0) ============
+var _currentGrowthTab = 'ratrace';
+
+function renderGrowth() {
+  _renderGrowthTab(_currentGrowthTab);
+  // 每次進入此頁都檢查成就
+  checkAchievements();
+}
+
+function switchGrowthTab(tab, btn) {
+  _currentGrowthTab = tab;
+  document.querySelectorAll('#page-growth .tab-btn').forEach(function(b) { b.classList.remove('active'); });
+  if (btn) btn.classList.add('active');
+  _renderGrowthTab(tab);
+}
+
+function _renderGrowthTab(tab) {
+  if (tab === 'ratrace') renderRatRace();
+  else if (tab === 'achievements') renderAchievements();
+  else if (tab === 'personality') renderPersonality();
+  else if (tab === 'simulator') renderSimulator();
+}
+
+// ======== 1a. 老鼠賽跑進度條 ========
+/** 近 N 天內符合條件的收支加總（以 TWD 計） */
+function _sumRangeTWD(list, days, filterFn) {
+  var now = new Date();
+  var cutoff = new Date(now.getTime() - days * 86400000).toISOString().slice(0, 10);
+  return list.filter(function(x) { return x.date >= cutoff && (!filterFn || filterFn(x)); })
+    .reduce(function(s, x) { return s + convert(x.amount, x.currency, 'TWD'); }, 0);
+}
+
+/** 計算被動收入 vs 支出比率（老鼠賽跑核心指標） */
+function computeRatRace() {
+  var d = U();
+  var passiveCats = ['投資收益', '利息', '股利', '租金收入'];
+  var passiveIncome = _sumRangeTWD(d.incomes || [], 30, function(i) {
+    return passiveCats.indexOf(i.category) >= 0;
+  });
+  var totalExp = _sumRangeTWD(d.expenses || [], 30);
+  var ratio = totalExp > 0 ? (passiveIncome / totalExp) : (passiveIncome > 0 ? Infinity : 0);
+  var escaped = ratio >= 1;
+  return { passiveIncome: passiveIncome, totalExp: totalExp, ratio: ratio, escaped: escaped };
+}
+
+function renderRatRace() {
+  var r = computeRatRace();
+  var pct = isFinite(r.ratio) ? Math.min(100, r.ratio * 100) : 100;
+  var gap = Math.max(0, r.totalExp - r.passiveIncome);
+  var color = r.escaped ? '#22c55e' : (pct > 50 ? '#f59e0b' : '#8b5cf6');
+
+  var medalHtml = r.escaped
+    ? '<div style="background:linear-gradient(135deg,#fbbf24,#f59e0b);border-radius:20px;padding:24px;margin-bottom:20px;text-align:center;color:#1a1a1a">' +
+        '<div style="font-size:56px;line-height:1">🏅</div>' +
+        '<div style="font-size:20px;font-weight:700;margin-top:8px">跳脫老鼠賽跑</div>' +
+        '<div style="font-size:13px;margin-top:4px;opacity:.85">你的被動收入已覆蓋所有支出，恭喜達成財務自由起點</div>' +
+      '</div>'
+    : '';
+
+  var html = medalHtml +
+    '<div style="background:var(--card);border:1px solid var(--border);border-radius:16px;padding:24px;margin-bottom:16px">' +
+      '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px">' +
+        '<h3 style="margin:0">🏃 老鼠賽跑進度</h3>' +
+        '<span style="font-size:28px;font-weight:700;color:' + color + '">' + (isFinite(r.ratio) ? (r.ratio * 100).toFixed(1) : '∞') + '%</span>' +
+      '</div>' +
+      '<div style="background:var(--border);border-radius:8px;height:18px;overflow:hidden;position:relative">' +
+        '<div style="height:100%;background:linear-gradient(90deg,' + color + ',' + color + 'dd);width:' + pct + '%;transition:width .6s"></div>' +
+        (r.escaped ? '<div style="position:absolute;right:8px;top:50%;transform:translateY(-50%);font-size:11px;font-weight:700;color:#fff">🔓 已跳脫</div>' : '') +
+      '</div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:20px">' +
+        '<div><div style="font-size:11px;color:var(--text3)">近 30 天被動收入</div><div style="font-size:18px;font-weight:700" class="c-green">+' + fmt(r.passiveIncome, 'TWD') + '</div></div>' +
+        '<div><div style="font-size:11px;color:var(--text3)">近 30 天總支出</div><div style="font-size:18px;font-weight:700" class="c-red">' + fmt(r.totalExp, 'TWD') + '</div></div>' +
+        '<div><div style="font-size:11px;color:var(--text3)">' + (r.escaped ? '超額覆蓋' : '還差') + '</div><div style="font-size:18px;font-weight:700">' + fmt(Math.abs(gap), 'TWD') + '</div></div>' +
+      '</div>' +
+    '</div>' +
+    '<div style="background:rgba(108,99,255,.08);border-left:3px solid var(--primary);padding:12px;font-size:13px;color:var(--text2);border-radius:0 8px 8px 0">' +
+      '<strong style="color:var(--text)">💡 老鼠賽跑是什麼？</strong><br>' +
+      '《富爸爸窮爸爸》的核心概念：一般人被薪水綁住，花錢的速度追著賺錢的速度。當你的<strong style="color:var(--text)">被動收入（投資收益、利息、股利、租金）</strong>能完全覆蓋生活支出，就不必再為錢工作——這就是「跳脫老鼠賽跑」。' +
+    '</div>' +
+    '<div style="margin-top:12px;font-size:12px;color:var(--text3)">' +
+      '被動收入計算範圍：近 30 天「投資收益」「利息」「股利」「租金收入」四類別的收入。若你的被動收入不屬於這些類別，請在收入頁手動切換。' +
+    '</div>';
+  document.getElementById('growthContent').innerHTML = html;
+}
+
+// ======== 1c. 成就解鎖 ========
+var ACHIEVEMENTS = [
+  { id: 'ach_first_entry', emoji: '📝', name: '邁出第一步', desc: '建立任一筆收入或支出記錄',
+    check: function(d) { return (d.incomes || []).length + (d.expenses || []).length > 0; } },
+  { id: 'ach_streak_30', emoji: '🔥', name: '連續 30 天', desc: '近 30 天每天都有記錄',
+    check: function(d) {
+      var today = new Date();
+      var days = {};
+      [].concat(d.incomes || [], d.expenses || []).forEach(function(x) {
+        if (x.date) days[x.date] = true;
+      });
+      for (var i = 0; i < 30; i++) {
+        var dt = new Date(today - i * 86400000).toISOString().slice(0, 10);
+        if (!days[dt]) return false;
+      }
+      return true;
+    } },
+  { id: 'ach_first_dividend', emoji: '👁', name: '財富之眼', desc: '首筆股利/投資收益入帳',
+    check: function(d) { return (d.incomes || []).some(function(i) { return ['投資收益','利息','股利','租金收入'].indexOf(i.category) >= 0; }); } },
+  { id: 'ach_emergency_fund', emoji: '🛡', name: '護盾值滿點', desc: '緊急預備金 ≥ 6 個月',
+    check: function(d) {
+      var cashAmt = (d.accounts || []).filter(function(a) { return a.type === 'cash'; }).reduce(function(s, a) { return s + convert(a.balance, a.currency, 'TWD'); }, 0);
+      var bankAmt = (d.accounts || []).filter(function(a) { return a.type === 'bank'; }).reduce(function(s, a) { return s + convert(a.balance, a.currency, 'TWD'); }, 0);
+      var rec = (d.receivables || []).filter(function(r) { return r.type === 'receivable' && r.status === 'pending'; }).reduce(function(s, r) { return s + convert(r.amount, r.currency, 'TWD'); }, 0);
+      var liquid = cashAmt + bankAmt + portfolioMarketValue('TWD') + rec;
+      var tE = _sumRangeTWD(d.expenses || [], 30);
+      return tE > 0 && (liquid / tE) >= 6;
+    } },
+  { id: 'ach_saving_rate', emoji: '💪', name: '意志力 +10', desc: '近 3 月儲蓄率連續 ≥ 20%',
+    check: function(d) {
+      var now = new Date();
+      for (var i = 0; i < 3; i++) {
+        var dt = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        var m = dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0');
+        var inc = (d.incomes || []).filter(function(x) { return (x.date || '').slice(0, 7) === m; }).reduce(function(s, x) { return s + convert(x.amount, x.currency, 'TWD'); }, 0);
+        var exp = (d.expenses || []).filter(function(x) { return (x.date || '').slice(0, 7) === m; }).reduce(function(s, x) { return s + convert(x.amount, x.currency, 'TWD'); }, 0);
+        if (inc <= 0) return false;
+        if ((inc - exp) / inc < 0.2) return false;
+      }
+      return true;
+    } },
+  { id: 'ach_low_debt', emoji: '⚖', name: '負債控制', desc: '負債比率 < 40%',
+    check: function(d) {
+      var cashAmt = (d.accounts || []).filter(function(a) { return a.type === 'cash'; }).reduce(function(s, a) { return s + convert(a.balance, a.currency, 'TWD'); }, 0);
+      var bankAmt = (d.accounts || []).filter(function(a) { return a.type === 'bank'; }).reduce(function(s, a) { return s + convert(a.balance, a.currency, 'TWD'); }, 0);
+      var invAmt = portfolioMarketValue('TWD');
+      var propAmt = (d.properties || []).reduce(function(s, p) { return s + convert(p.currentValue || 0, p.currency || 'TWD', 'TWD'); }, 0);
+      var vehAmt = (d.vehicles || []).reduce(function(s, v) { return s + convert(v.currentValue || 0, v.currency || 'TWD', 'TWD'); }, 0);
+      var rec = (d.receivables || []).filter(function(r) { return r.type === 'receivable' && r.status === 'pending'; }).reduce(function(s, r) { return s + convert(r.amount, r.currency, 'TWD'); }, 0);
+      var pay = (d.receivables || []).filter(function(r) { return r.type === 'payable' && r.status === 'pending'; }).reduce(function(s, r) { return s + convert(r.amount, r.currency, 'TWD'); }, 0);
+      var debt = (d.accounts || []).filter(function(a) { return a.type === 'credit'; }).reduce(function(s, a) { return s + convert(Math.abs(a.balance), a.currency, 'TWD'); }, 0);
+      var asset = cashAmt + bankAmt + invAmt + rec + propAmt + vehAmt;
+      var liab = debt + pay;
+      return asset > 0 && (liab / asset) < 0.4;
+    } },
+  { id: 'ach_millionaire', emoji: '💰', name: '百萬身價', desc: '淨資產突破 NT$1,000,000',
+    check: function(d) {
+      var cashAmt = (d.accounts || []).filter(function(a) { return a.type === 'cash'; }).reduce(function(s, a) { return s + convert(a.balance, a.currency, 'TWD'); }, 0);
+      var bankAmt = (d.accounts || []).filter(function(a) { return a.type === 'bank'; }).reduce(function(s, a) { return s + convert(a.balance, a.currency, 'TWD'); }, 0);
+      var invAmt = portfolioMarketValue('TWD');
+      var propAmt = (d.properties || []).reduce(function(s, p) { return s + convert(p.currentValue || 0, p.currency || 'TWD', 'TWD'); }, 0);
+      var vehAmt = (d.vehicles || []).reduce(function(s, v) { return s + convert(v.currentValue || 0, v.currency || 'TWD', 'TWD'); }, 0);
+      var rec = (d.receivables || []).filter(function(r) { return r.type === 'receivable' && r.status === 'pending'; }).reduce(function(s, r) { return s + convert(r.amount, r.currency, 'TWD'); }, 0);
+      var pay = (d.receivables || []).filter(function(r) { return r.type === 'payable' && r.status === 'pending'; }).reduce(function(s, r) { return s + convert(r.amount, r.currency, 'TWD'); }, 0);
+      var debt = (d.accounts || []).filter(function(a) { return a.type === 'credit'; }).reduce(function(s, a) { return s + convert(Math.abs(a.balance), a.currency, 'TWD'); }, 0);
+      return (cashAmt + bankAmt + invAmt + rec + propAmt + vehAmt - debt - pay) >= 1000000;
+    } },
+  { id: 'ach_first_position', emoji: '📊', name: '首檔持倉', desc: '在投資組合建立第一筆持倉',
+    check: function(d) { return (d.portfolio || []).length > 0; } },
+  { id: 'ach_escape_ratrace', emoji: '🏅', name: '跳脫老鼠賽跑', desc: '被動收入 ≥ 總支出',
+    check: function(d) { return computeRatRace().escaped; } },
+  { id: 'ach_project_done', emoji: '🎯', name: '專案達標', desc: '任一專案達成預算目標（未超支）',
+    check: function(d) {
+      return (d.projects || []).some(function(p) {
+        if (!p.budget || p.status !== 'closed') return false;
+        var exp = (d.expenses || []).filter(function(e) { return e.projectId === p.id; }).reduce(function(s, e) { return s + convert(e.amount, e.currency, 'TWD'); }, 0);
+        return exp <= convert(p.budget, p.currency || 'TWD', 'TWD');
+      });
+    } }
+];
+
+/** 檢查所有成就；若有新解鎖則記錄並 toast 提示 */
+function checkAchievements() {
+  var d = U();
+  if (!d.achievements) d.achievements = {};
+  var newly = [];
+  ACHIEVEMENTS.forEach(function(a) {
+    if (d.achievements[a.id] && d.achievements[a.id].unlockedAt) return;
+    try {
+      if (a.check(d)) {
+        d.achievements[a.id] = { unlockedAt: new Date().toISOString() };
+        newly.push(a);
+      }
+    } catch (e) { /* 靜默 */ }
+  });
+  if (newly.length > 0) {
+    save();
+    newly.forEach(function(a, i) {
+      setTimeout(function() {
+        showToast('🎉 解鎖成就：' + a.emoji + ' ' + a.name + '｜' + a.desc);
+      }, i * 1500);
+    });
+  }
+}
+
+function renderAchievements() {
+  var d = U();
+  if (!d.achievements) d.achievements = {};
+  var unlocked = ACHIEVEMENTS.filter(function(a) { return d.achievements[a.id]; }).length;
+  var total = ACHIEVEMENTS.length;
+  var pct = (unlocked / total) * 100;
+
+  var html = '<div style="background:var(--card);border:1px solid var(--border);border-radius:16px;padding:20px;margin-bottom:16px">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">' +
+      '<h3 style="margin:0">🏆 成就進度 ' + unlocked + ' / ' + total + '</h3>' +
+      '<span style="font-size:22px;font-weight:700;color:var(--primary-light)">' + pct.toFixed(0) + '%</span>' +
+    '</div>' +
+    '<div style="background:var(--border);border-radius:6px;height:10px;overflow:hidden">' +
+      '<div style="height:100%;background:linear-gradient(90deg,#8b5cf6,#22d3ee);width:' + pct + '%"></div>' +
+    '</div></div>';
+
+  html += '<div class="stat-grid">' + ACHIEVEMENTS.map(function(a) {
+    var got = d.achievements[a.id];
+    var date = got ? new Date(got.unlockedAt).toISOString().slice(0, 10) : '';
+    return '<div class="stat-card" style="text-align:center;' + (got ? '' : 'opacity:.45;filter:grayscale(.7)') + '">' +
+      '<div style="font-size:48px;line-height:1;margin-bottom:8px">' + a.emoji + '</div>' +
+      '<div style="font-weight:700;margin-bottom:4px">' + a.name + '</div>' +
+      '<div style="font-size:12px;color:var(--text3);line-height:1.4">' + a.desc + '</div>' +
+      (got ? '<div style="margin-top:8px;font-size:11px;color:var(--green)">✓ 已解鎖 ' + date + '</div>' : '<div style="margin-top:8px;font-size:11px;color:var(--text3)">🔒 尚未達成</div>') +
+      '</div>';
+  }).join('') + '</div>';
+
+  document.getElementById('growthContent').innerHTML = html;
+}
+
+// ======== 1b. 財務性格診斷 ========
+/** 依多指標推算使用者財務性格 */
+function computePersonality() {
+  var d = U();
+  // 近 3 月收入、支出
+  var now = new Date();
+  var months = [];
+  for (var i = 0; i < 3; i++) {
+    var dt = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    months.push(dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0'));
+  }
+  var inc3 = (d.incomes || []).filter(function(x) { return months.indexOf((x.date || '').slice(0, 7)) >= 0; })
+    .reduce(function(s, x) { return s + convert(x.amount, x.currency, 'TWD'); }, 0);
+  var exp3 = (d.expenses || []).filter(function(x) { return months.indexOf((x.date || '').slice(0, 7)) >= 0; })
+    .reduce(function(s, x) { return s + convert(x.amount, x.currency, 'TWD'); }, 0);
+  var savingRate = inc3 > 0 ? (inc3 - exp3) / inc3 : 0;
+
+  // 投資占流動資產比
+  var cashAmt = (d.accounts || []).filter(function(a) { return a.type === 'cash'; }).reduce(function(s, a) { return s + convert(a.balance, a.currency, 'TWD'); }, 0);
+  var bankAmt = (d.accounts || []).filter(function(a) { return a.type === 'bank'; }).reduce(function(s, a) { return s + convert(a.balance, a.currency, 'TWD'); }, 0);
+  var invAmt = portfolioMarketValue('TWD');
+  var liquid = cashAmt + bankAmt + invAmt;
+  var investRatio = liquid > 0 ? invAmt / liquid : 0;
+
+  // 支出變異度（3 月各月支出的標準差 / 平均）
+  var monthExps = months.map(function(m) {
+    return (d.expenses || []).filter(function(x) { return (x.date || '').slice(0, 7) === m; })
+      .reduce(function(s, x) { return s + convert(x.amount, x.currency, 'TWD'); }, 0);
+  });
+  var avgExp = monthExps.reduce(function(s, v) { return s + v; }, 0) / 3;
+  var variance = avgExp > 0 ? Math.sqrt(monthExps.reduce(function(s, v) { return s + Math.pow(v - avgExp, 2); }, 0) / 3) / avgExp : 0;
+
+  // 應付款占總負債比
+  var debt = (d.accounts || []).filter(function(a) { return a.type === 'credit'; }).reduce(function(s, a) { return s + convert(Math.abs(a.balance), a.currency, 'TWD'); }, 0);
+  var pay = (d.receivables || []).filter(function(r) { return r.type === 'payable' && r.status === 'pending'; }).reduce(function(s, r) { return s + convert(r.amount, r.currency, 'TWD'); }, 0);
+
+  // 分型邏輯
+  var type, emoji, slogan, advice;
+  if (inc3 === 0 && exp3 === 0) {
+    type = '新手村村民'; emoji = '🐣'; slogan = '剛踏入記帳世界，快記下第一筆吧！';
+    advice = '建議先記錄 7 天的收支，讓系統有足夠資料來診斷你的性格。';
+  } else if (savingRate < 0.05 && investRatio < 0.1) {
+    type = '月光族'; emoji = '🌙'; slogan = '賺多少花多少，錢包永遠是空的';
+    advice = '試著從每月存下 10% 開始。設定「定期支出」功能，看清楚必要支出後就能知道還能花多少。';
+  } else if (savingRate > 0.3 && investRatio < 0.1) {
+    type = '守財奴'; emoji = '🐉'; slogan = '寧可屯著不花也不敢投資';
+    advice = '儲蓄習慣很棒，但通膨會慢慢蠶食購買力。建議拿閒錢的 20-30% 開始定期定額 ETF，讓錢幫你工作。';
+  } else if (investRatio > 0.5 && variance > 0.3) {
+    type = '冒險家'; emoji = '🏴‍☠'; slogan = '進可攻、退可...還是進攻';
+    advice = '投資積極但支出不穩定，建議建立 6 個月緊急預備金在高流動帳戶裡，抵抗下檔風險。';
+  } else if (investRatio > 0.25 && savingRate > 0.15) {
+    type = '投資兒'; emoji = '📈'; slogan = '穩紮穩打，讓資產複利滾動';
+    advice = '配置很健康。下一階段：檢視資產配置比例（股/債/現金）是否符合你的風險偏好與年齡。';
+  } else if (pay > debt && pay > 10000) {
+    type = '欠債俠'; emoji = '📮'; slogan = '應付款堆積，現金流吃緊';
+    advice = '先處理應付款，避免滾雪球。應付款是隱形的短期負債，儘快結清再規劃投資。';
+  } else {
+    type = '平衡立'; emoji = '⚖'; slogan = '收支穩定、進退有度';
+    advice = '各項指標都在健康區間。下一步：挑戰儲蓄率 20%+ 或增加被動收入來源，往「跳脫老鼠賽跑」邁進。';
+  }
+
+  var result = {
+    type: type, emoji: emoji, slogan: slogan, advice: advice,
+    score: { savingRate: savingRate, investRatio: investRatio, variance: variance, inc3: inc3, exp3: exp3 },
+    updatedAt: new Date().toISOString()
+  };
+  d.personality = result;
+  return result;
+}
+
+function renderPersonality() {
+  var p = computePersonality();
+  var sr = p.score;
+  save();
+
+  var html = '<div style="background:linear-gradient(135deg,rgba(139,92,246,.15),rgba(34,211,238,.15));border:1px solid var(--primary);border-radius:20px;padding:32px;margin-bottom:20px;text-align:center">' +
+    '<div style="font-size:96px;line-height:1;margin-bottom:8px">' + p.emoji + '</div>' +
+    '<div style="font-size:28px;font-weight:700;margin-bottom:4px">' + p.type + '</div>' +
+    '<div style="font-size:14px;color:var(--text2);margin-bottom:16px">「' + p.slogan + '」</div>' +
+    '<div style="max-width:500px;margin:0 auto;background:var(--card);border-radius:12px;padding:16px;font-size:13px;text-align:left;line-height:1.6">' +
+      '<strong>💬 建議：</strong>' + p.advice +
+    '</div>' +
+  '</div>';
+
+  html += '<h3 style="margin:0 0 12px">📊 診斷指標</h3>' +
+    '<div class="stat-grid">' +
+      '<div class="stat-card"><div class="label">近 3 月儲蓄率</div>' +
+        '<div class="value ' + (sr.savingRate >= 0.2 ? 'c-green' : sr.savingRate >= 0.1 ? 'c-orange' : 'c-red') + '">' + (sr.savingRate * 100).toFixed(1) + '%</div>' +
+        '<div class="sub">收入 ' + fmt(sr.inc3, 'TWD') + '｜支出 ' + fmt(sr.exp3, 'TWD') + '</div></div>' +
+      '<div class="stat-card"><div class="label">投資占流動資產</div>' +
+        '<div class="value c-blue">' + (sr.investRatio * 100).toFixed(1) + '%</div>' +
+        '<div class="sub">>25% 積極｜10-25% 平衡｜<10% 保守</div></div>' +
+      '<div class="stat-card"><div class="label">支出穩定度</div>' +
+        '<div class="value ' + (sr.variance < 0.2 ? 'c-green' : sr.variance < 0.4 ? 'c-orange' : 'c-red') + '">' + (sr.variance < 0.2 ? '穩定' : sr.variance < 0.4 ? '波動' : '大起大落') + '</div>' +
+        '<div class="sub">變異係數 ' + (sr.variance * 100).toFixed(1) + '%</div></div>' +
+    '</div>' +
+    '<div style="margin-top:16px;font-size:12px;color:var(--text3)">性格分類僅供參考，每次打開此頁會依最新資料重新診斷。</div>';
+
+  document.getElementById('growthContent').innerHTML = html;
+}
+
+// ======== 2b. 人生大事模擬器 ========
+var LIFE_SCENARIOS = [
+  {
+    id: 'marriage', emoji: '💍', name: '結婚',
+    desc: '婚禮 + 蜜月 + 戒指等一次性支出',
+    fields: [{ key: 'oneTime', label: '一次性支出', defaultVal: 300000, unit: 'TWD' }],
+    impact: function(p) { return { oneTime: p.oneTime, monthly: 0 }; }
+  },
+  {
+    id: 'house', emoji: '🏠', name: '買房',
+    desc: '自備款 + 房貸月付 (20 年 2% 利率)',
+    fields: [
+      { key: 'price', label: '房屋總價', defaultVal: 15000000, unit: 'TWD' },
+      { key: 'downRatio', label: '自備款比例 (%)', defaultVal: 30, unit: '%' }
+    ],
+    impact: function(p) {
+      var down = p.price * p.downRatio / 100;
+      var loan = p.price - down;
+      // 房貸月付 = loan × r × (1+r)^n / ((1+r)^n - 1), r=2%/12, n=240
+      var r = 0.02 / 12, n = 240;
+      var monthly = loan * r * Math.pow(1 + r, n) / (Math.pow(1 + r, n) - 1);
+      return { oneTime: down, monthly: monthly };
+    }
+  },
+  {
+    id: 'car', emoji: '🚗', name: '買車',
+    desc: '一次性車價 + 每月油料/保險/保養',
+    fields: [
+      { key: 'price', label: '車價', defaultVal: 800000, unit: 'TWD' },
+      { key: 'monthly', label: '每月相關開銷', defaultVal: 5000, unit: 'TWD' }
+    ],
+    impact: function(p) { return { oneTime: p.price, monthly: p.monthly }; }
+  },
+  {
+    id: 'cat', emoji: '🐱', name: '養貓',
+    desc: '一次性醫療儲備 + 每月飼料/砂/保養',
+    fields: [
+      { key: 'oneTime', label: '一次性支出（醫療儲備）', defaultVal: 30000, unit: 'TWD' },
+      { key: 'monthly', label: '每月開銷', defaultVal: 5000, unit: 'TWD' }
+    ],
+    impact: function(p) { return { oneTime: p.oneTime, monthly: p.monthly }; }
+  },
+  {
+    id: 'startup', emoji: '🚀', name: '離職創業',
+    desc: '設備投入 + 收入歸零（支出照舊）',
+    fields: [
+      { key: 'equipment', label: '設備/開辦費', defaultVal: 200000, unit: 'TWD' },
+      { key: 'incomeLoss', label: '每月收入歸零（現月薪）', defaultVal: 50000, unit: 'TWD' }
+    ],
+    impact: function(p) { return { oneTime: p.equipment, monthly: p.incomeLoss }; }
+  },
+  {
+    id: 'baby', emoji: '👶', name: '生小孩',
+    desc: '生產一次性 + 每月奶粉/尿布/保母',
+    fields: [
+      { key: 'oneTime', label: '一次性支出（生產/月子）', defaultVal: 80000, unit: 'TWD' },
+      { key: 'monthly', label: '每月育兒開銷', defaultVal: 20000, unit: 'TWD' }
+    ],
+    impact: function(p) { return { oneTime: p.oneTime, monthly: p.monthly }; }
+  }
+];
+
+function renderSimulator() {
+  var html = '<div style="color:var(--text2);font-size:13px;margin-bottom:16px">選擇人生場景，系統會根據目前資產 + 近 3 月平均收支，模擬 <strong>5 年後</strong>的財務變化。</div>';
+
+  html += '<div class="stat-grid">' + LIFE_SCENARIOS.map(function(s) {
+    return '<div class="stat-card" style="cursor:pointer;text-align:center" onclick="openLifeSimulator(\'' + s.id + '\')">' +
+      '<div style="font-size:48px;line-height:1;margin-bottom:8px">' + s.emoji + '</div>' +
+      '<div style="font-weight:700">' + s.name + '</div>' +
+      '<div style="font-size:12px;color:var(--text3);margin-top:4px">' + s.desc + '</div>' +
+      '</div>';
+  }).join('') + '</div>';
+
+  html += '<div id="simResult" style="margin-top:20px"></div>';
+  document.getElementById('growthContent').innerHTML = html;
+}
+
+function openLifeSimulator(scenarioId) {
+  var s = LIFE_SCENARIOS.find(function(x) { return x.id === scenarioId; });
+  if (!s) return;
+  var m = document.getElementById('modalContent');
+  m.innerHTML = '<h3>' + s.emoji + ' ' + s.name + '模擬</h3>' +
+    '<p style="color:var(--text2);font-size:13px;margin-top:0">' + s.desc + '</p>' +
+    s.fields.map(function(f) {
+      return '<div class="form-group"><label>' + f.label + ' (' + f.unit + ')</label><input type="number" id="simF_' + f.key + '" value="' + f.defaultVal + '"></div>';
+    }).join('') +
+    '<input type="hidden" id="simF_scenarioId" value="' + scenarioId + '">' +
+    '<div class="modal-actions"><button class="btn btn-s" onclick="closeModal()">取消</button><button class="btn btn-p" onclick="runLifeSimulation()">開始模擬</button></div>';
+  document.getElementById('modalOverlay').classList.add('show');
+}
+
+function runLifeSimulation() {
+  var d = U();
+  var sId = document.getElementById('simF_scenarioId').value;
+  var s = LIFE_SCENARIOS.find(function(x) { return x.id === sId; });
+  var params = {};
+  s.fields.forEach(function(f) { params[f.key] = parseFloat(document.getElementById('simF_' + f.key).value) || 0; });
+  var imp = s.impact(params);
+
+  // 現況
+  var cashAmt = (d.accounts || []).filter(function(a) { return a.type === 'cash'; }).reduce(function(s2, a) { return s2 + convert(a.balance, a.currency, 'TWD'); }, 0);
+  var bankAmt = (d.accounts || []).filter(function(a) { return a.type === 'bank'; }).reduce(function(s2, a) { return s2 + convert(a.balance, a.currency, 'TWD'); }, 0);
+  var invAmt = portfolioMarketValue('TWD');
+  var rec = (d.receivables || []).filter(function(r) { return r.type === 'receivable' && r.status === 'pending'; }).reduce(function(s2, r) { return s2 + convert(r.amount, r.currency, 'TWD'); }, 0);
+  var propAmt = (d.properties || []).reduce(function(s2, p) { return s2 + convert(p.currentValue || 0, p.currency || 'TWD', 'TWD'); }, 0);
+  var vehAmt = (d.vehicles || []).reduce(function(s2, v) { return s2 + convert(v.currentValue || 0, v.currency || 'TWD', 'TWD'); }, 0);
+  var debt = (d.accounts || []).filter(function(a) { return a.type === 'credit'; }).reduce(function(s2, a) { return s2 + convert(Math.abs(a.balance), a.currency, 'TWD'); }, 0);
+  var pay = (d.receivables || []).filter(function(r) { return r.type === 'payable' && r.status === 'pending'; }).reduce(function(s2, r) { return s2 + convert(r.amount, r.currency, 'TWD'); }, 0);
+  var netAssetNow = cashAmt + bankAmt + invAmt + rec + propAmt + vehAmt - debt - pay;
+
+  // 近 3 月平均月收支
+  var now = new Date();
+  var months = [];
+  for (var i = 1; i <= 3; i++) {
+    var dt = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    months.push(dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0'));
+  }
+  var inc3 = (d.incomes || []).filter(function(x) { return months.indexOf((x.date || '').slice(0, 7)) >= 0; }).reduce(function(s2, x) { return s2 + convert(x.amount, x.currency, 'TWD'); }, 0);
+  var exp3 = (d.expenses || []).filter(function(x) { return months.indexOf((x.date || '').slice(0, 7)) >= 0; }).reduce(function(s2, x) { return s2 + convert(x.amount, x.currency, 'TWD'); }, 0);
+  var avgIncome = inc3 / 3, avgExpense = exp3 / 3;
+
+  // 模擬 5 年 = 60 個月
+  // 情境影響：一次性從淨資產扣除；每月新增 "額外支出" 或 "收入損失"
+  // 注意「離職創業」的 monthly 其實是收入損失 → 影響現金流
+  var simNetAsset = netAssetNow - imp.oneTime;
+  var cashFlow = avgIncome - avgExpense;
+  if (sId === 'startup') cashFlow -= imp.monthly;  // 收入歸零
+  else cashFlow -= imp.monthly;                    // 其他場景都是新增支出
+  // 每月淨現金流 × 60 月加到淨資產
+  var simNetAsset5y = simNetAsset + cashFlow * 60;
+
+  // 產生 60 個月趨勢點
+  var points = [];
+  for (var m2 = 0; m2 <= 60; m2++) {
+    points.push(simNetAsset + cashFlow * m2);
+  }
+
+  // 計算「破產月」— 當 net asset 首次 < 0
+  var bankruptMonth = -1;
+  for (var i2 = 0; i2 < points.length; i2++) {
+    if (points[i2] < 0) { bankruptMonth = i2; break; }
+  }
+
+  var baseline5y = netAssetNow + (avgIncome - avgExpense) * 60;
+  var delta = simNetAsset5y - baseline5y;
+
+  closeModal();
+  var resultEl = document.getElementById('simResult');
+  if (!resultEl) return;
+
+  var html = '<div style="background:var(--card);border:1px solid var(--border);border-radius:16px;padding:20px">' +
+    '<h3 style="margin-top:0">' + s.emoji + ' ' + s.name + '｜5 年模擬結果</h3>' +
+    '<div class="stat-grid">' +
+      '<div class="stat-card"><div class="label">現在淨資產</div><div class="value c-blue">' + fmt(netAssetNow, 'TWD') + '</div></div>' +
+      '<div class="stat-card"><div class="label">5 年後（決定此情境）</div><div class="value ' + (simNetAsset5y >= 0 ? 'c-primary' : 'c-red') + '">' + fmt(simNetAsset5y, 'TWD') + '</div></div>' +
+      '<div class="stat-card"><div class="label">5 年後（不做此事）</div><div class="value">' + fmt(baseline5y, 'TWD') + '</div></div>' +
+      '<div class="stat-card"><div class="label">影響差額</div><div class="value ' + (delta >= 0 ? 'c-green' : 'c-red') + '">' + (delta >= 0 ? '+' : '') + fmt(delta, 'TWD') + '</div></div>' +
+    '</div>' +
+    (bankruptMonth >= 0
+      ? '<div style="background:rgba(239,68,68,.1);border:1px solid var(--red);border-radius:12px;padding:12px;margin-top:16px;font-size:13px"><strong class="c-red">⚠ 風險警示：</strong>按此情境，約第 ' + bankruptMonth + ' 個月（' + (bankruptMonth / 12).toFixed(1) + ' 年）淨資產會跌破 0。建議調整參數或提前增加收入。</div>'
+      : '<div style="background:rgba(34,197,94,.1);border:1px solid var(--green);border-radius:12px;padding:12px;margin-top:16px;font-size:13px"><strong class="c-green">✓ 可承受：</strong>5 年內淨資產保持正值，此決定在財務面可以承擔。</div>') +
+    '<canvas id="simChart" height="180" style="margin-top:16px"></canvas>' +
+  '</div>';
+  resultEl.innerHTML = html;
+
+  // 繪製 60 月曲線
+  setTimeout(function() {
+    var cv = document.getElementById('simChart');
+    if (!cv) return;
+    var ctx = cv.getContext('2d');
+    var w = cv.width = cv.offsetWidth, h = cv.height = cv.offsetHeight;
+    var max = Math.max.apply(null, points.concat([baseline5y, 0])), min = Math.min.apply(null, points.concat([0]));
+    var pad = 20;
+    ctx.clearRect(0, 0, w, h);
+    function y(v) { return pad + (h - 2 * pad) * (1 - (v - min) / (max - min || 1)); }
+    // 0 線
+    var y0 = y(0);
+    ctx.strokeStyle = 'rgba(255,255,255,.15)'; ctx.setLineDash([4, 4]);
+    ctx.beginPath(); ctx.moveTo(pad, y0); ctx.lineTo(w - pad, y0); ctx.stroke();
+    ctx.setLineDash([]);
+    // 基準（不做此事）
+    ctx.strokeStyle = '#6b7280'; ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    for (var k = 0; k <= 60; k++) {
+      var xp = pad + (w - 2 * pad) * k / 60;
+      var yp = y(netAssetNow + (avgIncome - avgExpense) * k);
+      if (k === 0) ctx.moveTo(xp, yp); else ctx.lineTo(xp, yp);
+    }
+    ctx.stroke();
+    // 情境線
+    ctx.strokeStyle = '#8b5cf6'; ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    for (var k2 = 0; k2 < points.length; k2++) {
+      var xp2 = pad + (w - 2 * pad) * k2 / 60;
+      var yp2 = y(points[k2]);
+      if (k2 === 0) ctx.moveTo(xp2, yp2); else ctx.lineTo(xp2, yp2);
+    }
+    ctx.stroke();
+    // 標籤
+    ctx.fillStyle = '#9ca3af'; ctx.font = '11px sans-serif';
+    ctx.fillText('0', 4, y0 + 3);
+    ctx.fillText('今', pad - 4, h - 4);
+    ctx.fillText('5 年後', w - pad - 30, h - 4);
+    ctx.fillStyle = '#8b5cf6'; ctx.fillText('● 此情境', w - 100, pad + 10);
+    ctx.fillStyle = '#6b7280'; ctx.fillText('● 不做此事', w - 100, pad + 26);
+  }, 50);
 }
 
 // ============ 匯率換算 ============
