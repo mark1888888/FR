@@ -106,10 +106,12 @@
           <option value="HKD">HKD</option>
         </select>
       </div>
-      <div class="stat-section-title">資產狀況</div>
+      <div class="stat-section-title">資產負債表（存量）</div>
       <div class="stat-grid" id="dashStatsAssets"></div>
-      <div class="stat-section-title">本月收支</div>
+      <div class="stat-section-title">收支儲蓄表（本月流量）</div>
       <div class="stat-grid" id="dashStatsFlow"></div>
+      <div class="stat-section-title">財務健康指標</div>
+      <div class="stat-grid" id="dashStatsHealth"></div>
       <div class="chart-container">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
           <h3 style="margin:0">本月收支趨勢</h3>
@@ -204,7 +206,7 @@
         <div class="stat-grid" id="aasReceivableStats"></div>
         <div class="table-scroll-wrap">
           <table>
-            <thead><tr><th>帳戶名稱</th><th>對象</th><th>幣別</th><th>金額</th><th>備註</th></tr></thead>
+            <thead><tr><th>應收日期</th><th>對象</th><th>幣別</th><th>金額</th><th>備註</th></tr></thead>
             <tbody id="aasReceivableTable"></tbody>
           </table>
         </div>
@@ -214,7 +216,7 @@
         <div class="stat-grid" id="aasPayableStats"></div>
         <div class="table-scroll-wrap">
           <table>
-            <thead><tr><th>帳戶名稱</th><th>對象</th><th>幣別</th><th>金額</th><th>備註</th></tr></thead>
+            <thead><tr><th>應付日期</th><th>對象</th><th>幣別</th><th>金額</th><th>備註</th></tr></thead>
             <tbody id="aasPayableTable"></tbody>
           </table>
         </div>
@@ -308,7 +310,7 @@
           </div>
           <div class="table-scroll-wrap">
             <table>
-              <thead><tr><th>建立日期</th><th>應付日期</th><th>狀態</th><th>對象/機構</th><th>說明</th><th>金額</th><th>幣別</th><th>帳戶</th><th>操作</th></tr></thead>
+              <thead><tr><th>建立日期</th><th>應付日期</th><th>狀態</th><th>對象/機構</th><th>說明</th><th>金額</th><th>幣別</th><th>操作</th></tr></thead>
               <tbody id="recvTable"></tbody>
             </table>
           </div>
