@@ -45,7 +45,7 @@ function getIcon(cat) {
 const DEFAULT_INC_CATS = ['薪資','獎金','投資收益','兼職','利息','其他收入'];
 const DEFAULT_EXP_CATS = ['餐飲','交通','購物','娛樂','醫療','教育','居住','日用品','通訊','保險','其他支出'];
 const CURRENCIES = { TWD:'新台幣', USD:'美元', JPY:'日圓', EUR:'歐元', CNY:'人民幣', KRW:'韓元', HKD:'港幣' };
-const ACCOUNT_TYPES = { bank:'銀行存款', cash:'現金', credit:'信用卡', receivable:'未收款', payable:'應付款', invest:'投資/其他' };
+const ACCOUNT_TYPES = { bank:'銀行存款', cash:'現金', credit:'信用卡', receivable:'應收款', payable:'應付款', invest:'投資/其他' };
 const PROPERTY_TYPES = { house:'房屋', land:'土地', apartment:'公寓/大廈', commercial:'商業用房', parking:'車位', other_property:'其他不動產' };
 const VEHICLE_TYPES = { car:'汽車', motorcycle:'機車', bicycle:'自行車', boat:'船舶', other_vehicle:'其他動產' };
 const PIE_COLORS = ['#6c63ff','#00d2ff','#22c55e','#f59e0b','#ef4444','#ec4899','#8b5cf6','#14b8a6','#f97316','#64748b','#a855f7','#06b6d4'];
@@ -72,11 +72,16 @@ function ensureSyncStatusEl() {
   return el;
 }
 
-/** 顯示同步狀態訊息 */
+/** 顯示同步狀態訊息；錯誤時點擊元素可立即重試。 */
 function showSync(msg, type) {
   var el = ensureSyncStatusEl();
-  el.textContent = msg;
+  el.textContent = msg + (type === 'err' ? '｜點此重試' : '');
   el.className = 'sync-status sync-' + type;
+  el.style.cursor = (type === 'err') ? 'pointer' : '';
+  el.onclick = (type === 'err') ? function() {
+    el.textContent = '重新同步中...';
+    cloudSave();
+  } : null;
   if (type === 'ok') {
     setTimeout(function() { el.classList.add('sync-hide'); }, 2000);
   }
@@ -127,14 +132,34 @@ function save() {
   cloudSave(); // 每次修改立即上傳
 }
 
-/** 雲端儲存 */
-async function cloudSave() {
+/** 雲端儲存（v1.8.2 加入錯誤診斷與重試） */
+var _cloudSaveInFlight = false;
+
+/** 將 Supabase error 物件格式化為人可讀的簡短訊息。 */
+function _formatCloudError(e) {
+  if (!e) return '未知錯誤';
+  // Supabase 常見錯誤
+  var code = e.code || e.statusCode || '';
+  var msg = e.message || e.msg || String(e);
+  if (/JWT|token|401/i.test(msg) || code === '401') return '登入逾期，請重新登入';
+  if (/permission|denied|403|RLS/i.test(msg)) return '權限不足（RLS 政策）';
+  if (/fetch|network|Failed to fetch|NetworkError/i.test(msg)) return '網路連線異常';
+  if (/too large|payload|size|413/i.test(msg) || code === '413') return '資料超過雲端單次上傳上限';
+  if (/duplicate|conflict|23505/i.test(msg)) return '資料衝突';
+  if (/timeout|timed out/i.test(msg)) return '雲端回應逾時';
+  // 兜底：取前 80 字
+  return msg.slice(0, 80);
+}
+
+async function cloudSave(attempt) {
   if (!currentUserId || !DB) return;
+  if (_cloudSaveInFlight) return; // 避免同時多次上傳
+  _cloudSaveInFlight = true;
+  attempt = attempt || 1;
   showSync('儲存中...', 'saving');
   try {
-    // 確保存入雲端時帶有最新時間戳
     DB.updated_at = new Date().toISOString();
-    saveLocal(); // 同步更新本地
+    saveLocal();
 
     var result = await _sb.from('user_data').upsert(
       { user_id: currentUserId, data: DB },
@@ -142,9 +167,20 @@ async function cloudSave() {
     );
     if (result.error) throw result.error;
     showSync('已同步至雲端 ✓', 'ok');
+    _cloudSaveInFlight = false;
   } catch (e) {
-    console.error('Cloud save error:', e);
-    showSync('雲端同步失敗（已存本地）', 'err');
+    _cloudSaveInFlight = false;
+    console.error('Cloud save error (attempt ' + attempt + '):', e);
+    var reason = _formatCloudError(e);
+
+    // 網路或逾時類錯誤：最多重試 2 次（指數退避 1s → 3s）
+    var retriable = /網路連線異常|雲端回應逾時/.test(reason);
+    if (retriable && attempt < 3) {
+      showSync('同步失敗（' + reason + '），' + Math.pow(2, attempt) + ' 秒後重試 (' + attempt + '/2)...', 'err');
+      setTimeout(function() { cloudSave(attempt + 1); }, attempt * 2000);
+      return;
+    }
+    showSync('雲端同步失敗（已存本地）：' + reason, 'err');
   }
 }
 
@@ -288,12 +324,55 @@ document.addEventListener('visibilitychange', function() {
   }
 });
 
-/** 取得資料並確保 watchStocks 欄位存在 */
+var _legacyMigrated = false;
+
+/** v1.8.2 一次性資料移轉：將舊版「應收款帳戶」/「應付款帳戶」(type=receivable/payable) 轉成應收/應付款明細。
+ *  新架構以 d.receivables 明細為主，不再使用帳戶型別 receivable/payable。 */
+function _migrateLegacyReceivablePayableAccounts() {
+  if (!DB || !DB.accounts) return false;
+  var legacy = DB.accounts.filter(function(a) {
+    return a.type === 'receivable' || a.type === 'payable';
+  });
+  if (legacy.length === 0) return false;
+
+  if (!DB.receivables) DB.receivables = [];
+  var today = new Date().toISOString().slice(0, 10);
+
+  legacy.forEach(function(a) {
+    var amount = Math.abs(Number(a.balance) || 0);
+    if (amount <= 0) return;   // 空餘額帳戶不建立明細
+    DB.receivables.push({
+      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6) + '_mig',
+      type: a.type,
+      date: today,
+      dueDate: '',
+      target: a.name || (a.type === 'receivable' ? '（舊應收款）' : '（舊應付款）'),
+      amount: amount,
+      currency: a.currency || 'TWD',
+      note: (a.note ? a.note + '｜' : '') + '自舊帳戶移轉',
+      status: 'pending'
+    });
+  });
+
+  DB.accounts = DB.accounts.filter(function(a) {
+    return a.type !== 'receivable' && a.type !== 'payable';
+  });
+  console.log('[FlowRich] 已自動移轉 ' + legacy.length + ' 筆舊 receivable/payable 帳戶為明細');
+  save();
+  return true;
+}
+
+/** 取得資料並確保各欄位預設值存在；首次存取觸發一次性資料移轉。 */
 function U() {
   if (!DB.watchStocks) DB.watchStocks = ['2330','2317','2454'];
   if (!DB.categoryIcons) DB.categoryIcons = {};
   if (!DB.transfers) DB.transfers = [];
+  if (!DB.receivables) DB.receivables = [];
   if (!DB.updated_at) DB.updated_at = new Date().toISOString();
+  if (!_legacyMigrated) {
+    _legacyMigrated = true;
+    _migrateLegacyReceivablePayableAccounts();
+  }
   return DB;
 }
 
@@ -917,7 +996,7 @@ function renderAssets() {
   var d = U();
   var titles = {
     bank: '銀行存款帳戶', cash: '現金帳戶', credit: '信用卡帳戶',
-    receivable: '未收款帳戶', payable: '應付款帳戶', invest: '投資/其他資產',
+    receivable: '應收款追蹤', payable: '應付款追蹤', invest: '投資/其他資產',
     property: '不動產資產', vehicle: '動產資產'
   };
   document.getElementById('assetTableTitle').textContent = titles[currentAssetTab] || currentAssetTab;
@@ -930,60 +1009,73 @@ function renderAssets() {
     _renderVehicleTab(d); return;
   }
 
-  var list = d.accounts.filter(function(a) { return a.type === currentAssetTab; });
+  // ===== 應收款/應付款分頁：直接顯示「追蹤」介面，不顯示帳戶表格 =====
+  var isRecvPay = (currentAssetTab === 'receivable' || currentAssetTab === 'payable');
+  var accountWrap = document.getElementById('assetAccountWrap');
+  var assetAddBtn = document.getElementById('assetAddBtn');
+  var recvSection = document.getElementById('receivableSection');
 
-  var tTWD = list.reduce(function(s, a) {
-    if (currentAssetTab === 'payable') return s + convert(Math.abs(a.balance), a.currency, 'TWD');
+  if (isRecvPay) {
+    // 隱藏帳戶表格、隱藏「+ 新增帳戶」按鈕
+    if (accountWrap) accountWrap.style.display = 'none';
+    if (assetAddBtn) assetAddBtn.parentElement.style.display = 'none';
+
+    // 統計卡：以明細為準（應收/應付款追蹤）
+    var isRecv = currentAssetTab === 'receivable';
+    var pendingDetails = (d.receivables || []).filter(function(r) {
+      return r.type === (isRecv ? 'receivable' : 'payable') && r.status === 'pending';
+    });
+    var tTWD = pendingDetails.reduce(function(s, r) {
+      return s + convert(r.amount, r.currency, 'TWD');
+    }, 0);
+    document.getElementById('assetStats').innerHTML =
+      '<div class="stat-card"><div class="label">' + (isRecv ? '應收款總計' : '應付款總計') + ' (TWD)</div>' +
+      '<div class="value ' + (isRecv ? 'c-orange' : 'c-red') + '">' + fmt(tTWD, 'TWD') + '</div>' +
+      '<div class="sub">' + pendingDetails.length + ' 筆待' + (isRecv ? '收' : '付') + '</div></div>';
+
+    // 明細區塊：更新標題與按鈕
+    if (recvSection) {
+      recvSection.style.display = 'block';
+      document.getElementById('recvTableTitle').textContent = isRecv ? '應收款追蹤' : '應付款追蹤';
+      var addBtnEl = recvSection.querySelector('button');
+      addBtnEl.textContent = isRecv ? '+ 新增應收款' : '+ 新增應付款';
+      addBtnEl.onclick = function() { openModal('receivable'); };
+      renderReceivables(isRecv);
+    }
+    return;
+  }
+
+  // ===== 一般帳戶分頁 =====
+  if (accountWrap) accountWrap.style.display = '';
+  if (assetAddBtn) assetAddBtn.parentElement.style.display = '';
+  if (recvSection) recvSection.style.display = 'none';
+
+  var list = d.accounts.filter(function(a) { return a.type === currentAssetTab; });
+  var tTWDAcct = list.reduce(function(s, a) {
     return s + convert(a.balance, a.currency, 'TWD');
   }, 0);
 
-  // 依帳戶類型調整表頭
-  if (currentAssetTab === 'receivable') {
-    document.getElementById('assetThead').innerHTML =
-      '<tr><th style="width:40px"></th><th>名稱</th><th>付款對象</th><th>幣別</th><th>應收金額</th><th>備註</th><th></th></tr>';
-  } else if (currentAssetTab === 'payable') {
-    document.getElementById('assetThead').innerHTML =
-      '<tr><th style="width:40px"></th><th>名稱</th><th>收款對象</th><th>幣別</th><th>應付金額</th><th>備註</th><th></th></tr>';
-  } else {
-    document.getElementById('assetThead').innerHTML =
-      '<tr><th style="width:40px"></th><th>帳戶名稱</th><th>機構</th><th>幣別</th><th>餘額</th><th>說明</th><th></th></tr>';
-  }
+  document.getElementById('assetThead').innerHTML =
+    '<tr><th style="width:40px"></th><th>帳戶名稱</th><th>機構</th><th>幣別</th><th>餘額</th><th>說明</th><th></th></tr>';
 
   document.getElementById('assetStats').innerHTML =
     '<div class="stat-card"><div class="label">' + titles[currentAssetTab] + '合計 (TWD)</div>' +
-    '<div class="value ' + (currentAssetTab === 'credit' || currentAssetTab === 'payable' ? 'c-red' : currentAssetTab === 'receivable' ? 'c-orange' : 'c-blue') + '">' +
-    fmt(tTWD, 'TWD') + '</div><div class="sub">' + list.length + ' 個帳戶</div></div>';
+    '<div class="value ' + (currentAssetTab === 'credit' ? 'c-red' : 'c-blue') + '">' +
+    fmt(tTWDAcct, 'TWD') + '</div><div class="sub">' + list.length + ' 個帳戶</div></div>';
 
   var tb = document.getElementById('assetTable');
   tb.innerHTML = list.length ? list.map(function(a) {
-    var displayBalance = (currentAssetTab === 'payable') ? Math.abs(a.balance) : a.balance;
-    var colorClass = (currentAssetTab === 'payable') ? 'c-red' : (a.balance >= 0 ? 'c-green' : 'c-red');
+    var colorClass = a.balance >= 0 ? 'c-green' : 'c-red';
     return '<tr draggable="true" data-id="' + a.id + '">' +
       '<td><span class="drag-handle">⠿</span></td>' +
       '<td style="font-weight:600">' + a.name + '</td>' +
       '<td>' + (a.institution || '-') + '</td>' +
       '<td>' + a.currency + '</td>' +
-      '<td style="font-weight:600" class="' + colorClass + '">' + fmt(displayBalance, a.currency) + '</td>' +
+      '<td style="font-weight:600" class="' + colorClass + '">' + fmt(a.balance, a.currency) + '</td>' +
       '<td style="color:var(--text3)">' + (a.note || '-') + '</td>' +
       '<td><span class="edit-btn" onclick="editAccount(\'' + a.id + '\')">✏️</span>' +
       '<span class="del-btn" onclick="deleteAccount(\'' + a.id + '\')">✕</span></td></tr>';
   }).join('') : '<tr><td colspan="7" style="text-align:center;color:var(--text3);padding:40px">尚無帳戶</td></tr>';
-
-  // 應收款/應付款明細區塊
-  var recvSection = document.getElementById('receivableSection');
-  if (recvSection) {
-    if (currentAssetTab === 'receivable' || currentAssetTab === 'payable') {
-      recvSection.style.display = 'block';
-      var isRecv = currentAssetTab === 'receivable';
-      document.getElementById('recvTableTitle').textContent = isRecv ? '應收款明細' : '應付款明細';
-      var addBtnEl = recvSection.querySelector('button');
-      addBtnEl.textContent = isRecv ? '+ 新增應收款' : '+ 新增應付款';
-      addBtnEl.onclick = function() { openModal('receivable'); };
-      renderReceivables(isRecv);
-    } else {
-      recvSection.style.display = 'none';
-    }
-  }
 
   initAssetDrag();
 }
@@ -1153,6 +1245,10 @@ function renderReceivables(isRecv) {
     } else {
       statusHtml = '<span class="tag tag-blue">未到期</span>';
     }
+    var acct = r.accountId ? d.accounts.find(function(a) { return a.id === r.accountId; }) : null;
+    var acctLabel = acct
+      ? '<span style="color:var(--text)">' + acct.name + '</span>'
+      : '<span style="color:var(--text3);font-size:12px">未指定</span>';
     return '<tr' + (overdueDays > 0 ? ' style="background:rgba(239,68,68,.05)"' : '') + '>' +
       '<td>' + (r.date || '-') + '</td>' +
       '<td>' + (r.dueDate || '-') + '</td>' +
@@ -1161,34 +1257,141 @@ function renderReceivables(isRecv) {
       '<td>' + (r.note || '-') + '</td>' +
       '<td style="font-weight:600" class="' + (isRecv ? 'c-orange' : 'c-red') + '">' + fmt(r.amount, r.currency) + '</td>' +
       '<td>' + (r.currency || 'TWD') + '</td>' +
+      '<td>' + acctLabel + '</td>' +
       '<td>' +
         (r.status !== 'paid' ? '<span class="edit-btn" onclick="markReceivablePaid(\'' + r.id + '\')" title="' + (isRecv ? '標記已收款' : '標記已付款') + '">✅</span>' : '') +
         '<span class="edit-btn" onclick="editReceivable(\'' + r.id + '\')">✏️</span>' +
         '<span class="del-btn" onclick="deleteReceivable(\'' + r.id + '\')">✕</span>' +
       '</td></tr>';
-  }).join('') : '<tr><td colspan="8" style="text-align:center;color:var(--text3);padding:40px">尚無' + (isRecv ? '應收款' : '應付款') + '記錄</td></tr>';
+  }).join('') : '<tr><td colspan="9" style="text-align:center;color:var(--text3);padding:40px">尚無' + (isRecv ? '應收款' : '應付款') + '記錄</td></tr>';
 }
 
+/** 確保分類清單存在指定項目；若無則自動新增到使用者的類別清單。 */
+function _ensureCategory(list, name) {
+  if (!Array.isArray(list)) return;
+  if (list.indexOf(name) === -1) list.push(name);
+}
+
+/** 標記應收/應付款為已收/已付。若已指定對應帳戶，會：
+ *  1. 在收入/支出建立一筆紀錄（類別：應收款入帳 / 應付款支付）
+ *  2. 調整該帳戶的餘額
+ *  3. 在明細上記錄 paidIncomeId / paidExpenseId 以便未來追溯
+ *  若未指定帳戶，僅變更 status，不動帳戶也不建金流紀錄。
+ */
 function markReceivablePaid(id) {
   var d = U();
   var r = (d.receivables || []).find(function(rv) { return rv.id === id; });
   if (!r) return;
   var isRecv = r.type === 'receivable';
-  showConfirmModal(isRecv ? '確定標記為已收款？' : '確定標記為已付款？', function() {
+  var today = new Date().toISOString().slice(0, 10);
+
+  // 無指定帳戶 → 僅更新狀態
+  if (!r.accountId) {
+    showConfirmModal(
+      '此筆未指定' + (isRecv ? '收款' : '付款') + '帳戶，僅會更新狀態為「已' + (isRecv ? '收' : '付') + '」，不會產生收支紀錄或調整帳戶餘額。確定繼續？',
+      function() {
+        r.status = 'paid';
+        r.paidDate = today;
+        save();
+        renderAssets();
+        showToast(isRecv ? '已標記已收款（未連動帳戶）' : '已標記已付款（未連動帳戶）');
+      }
+    );
+    return;
+  }
+
+  var acct = d.accounts.find(function(a) { return a.id === r.accountId; });
+  if (!acct) {
+    showToast('找不到對應帳戶，請先編輯此筆補上帳戶', 'warn');
+    return;
+  }
+
+  var msg = isRecv
+    ? '確定標記為已收款？系統會在「收入」新增 ' + fmt(r.amount, r.currency) + '（類別：應收款入帳），並存入「' + acct.name + '」。'
+    : '確定標記為已付款？系統會在「支出」新增 ' + fmt(r.amount, r.currency) + '（類別：應付款支付），並從「' + acct.name + '」扣除。';
+
+  showConfirmModal(msg, function() {
+    var amountInAcctCur = convert(r.amount, r.currency, acct.currency);
+
+    if (isRecv) {
+      _ensureCategory(d.incomeCategories, '應收款入帳');
+      var incId = genId();
+      d.incomes.push({
+        id: incId,
+        date: today,
+        category: '應收款入帳',
+        accountId: r.accountId,
+        amount: r.amount,
+        currency: r.currency,
+        note: '[應收款] ' + (r.target || '') + (r.note ? '｜' + r.note : ''),
+        payTo: r.target || '',
+        usedBy: ''
+      });
+      acct.balance += amountInAcctCur;
+      r.paidIncomeId = incId;
+    } else {
+      _ensureCategory(d.expenseCategories, '應付款支付');
+      var expId = genId();
+      d.expenses.push({
+        id: expId,
+        date: today,
+        category: '應付款支付',
+        payMethod: '銀行轉帳',
+        accountId: r.accountId,
+        amount: r.amount,
+        currency: r.currency,
+        note: '[應付款] ' + (r.target || '') + (r.note ? '｜' + r.note : ''),
+        payTo: r.target || '',
+        usedBy: '',
+        transferAccount: ''
+      });
+      acct.balance -= amountInAcctCur;
+      r.paidExpenseId = expId;
+    }
+
     r.status = 'paid';
-    save(); renderAssets();
-    showToast(isRecv ? '已標記已收款' : '已標記已付款');
+    r.paidDate = today;
+    save();
+    renderAssets();
+    showToast(isRecv ? '已收款，已在收入新增紀錄並存入帳戶' : '已付款，已在支出新增紀錄並從帳戶扣除');
   });
 }
 
 function editReceivable(id) { openModal('receivable', id); }
 
 function deleteReceivable(id) {
-  showConfirmModal('確定刪除此筆記錄？', function() {
-    var d = U();
-    d.receivables = (d.receivables || []).filter(function(r) { return r.id !== id; });
+  var d = U();
+  var r = (d.receivables || []).find(function(rv) { return rv.id === id; });
+  if (!r) return;
+  var hasLinkedTx = !!(r.paidIncomeId || r.paidExpenseId);
+  var msg = hasLinkedTx
+    ? '此筆已標記' + (r.type === 'receivable' ? '已收款' : '已付款') + '，會連動刪除對應的' + (r.type === 'receivable' ? '收入' : '支出') + '紀錄並還原帳戶餘額。確定刪除？'
+    : '確定刪除此筆記錄？';
+
+  showConfirmModal(msg, function() {
+    // 連動還原：刪除關聯 income/expense 並回補帳戶
+    if (r.paidIncomeId) {
+      var incIdx = (d.incomes || []).findIndex(function(i) { return i.id === r.paidIncomeId; });
+      if (incIdx >= 0) {
+        var inc = d.incomes[incIdx];
+        var acct = d.accounts.find(function(a) { return a.id === inc.accountId; });
+        if (acct) acct.balance -= convert(inc.amount, inc.currency, acct.currency);
+        d.incomes.splice(incIdx, 1);
+      }
+    }
+    if (r.paidExpenseId) {
+      var expIdx = (d.expenses || []).findIndex(function(e) { return e.id === r.paidExpenseId; });
+      if (expIdx >= 0) {
+        var exp = d.expenses[expIdx];
+        var acct2 = d.accounts.find(function(a) { return a.id === exp.accountId; });
+        if (acct2) acct2.balance += convert(exp.amount, exp.currency, acct2.currency);
+        d.expenses.splice(expIdx, 1);
+      }
+    }
+    d.receivables = d.receivables.filter(function(rv) { return rv.id !== id; });
     save();
     renderAssets();
+    showToast(hasLinkedTx ? '已刪除並還原帳戶' : '已刪除');
   });
 }
 
@@ -1204,6 +1407,7 @@ function saveReceivable() {
     target: document.getElementById('f_target').value.trim(),
     amount: parseFloat(document.getElementById('f_amt').value) || 0,
     currency: document.getElementById('f_cur').value,
+    accountId: document.getElementById('f_acct').value || '',
     note: document.getElementById('f_note').value.trim(),
     status: 'pending'
   };
@@ -1222,38 +1426,73 @@ function saveReceivable() {
   showToast((currentAssetTab === 'payable' ? '應付款' : '應收款') + '已儲存');
 }
 
-// ============ 資產拖拽排序 ============
-var dragSrcRow = null;
+// ============ 資產拖拽排序（v1.8.2 重寫：getBoundingClientRect + 上/下判斷 + 正確 index 位移） ============
+var _dragSrcRow = null;
+var _dropTargetRow = null;
+var _dropAfter = false;  // true: 插入到目標之後, false: 之前
+
+function _clearDragOver() {
+  document.querySelectorAll('#assetTable tr').forEach(function(r) {
+    r.classList.remove('drag-over-top', 'drag-over-bottom');
+  });
+}
+
 function initAssetDrag() {
-  var rows = document.querySelectorAll('#assetTable tr[draggable]');
+  var tbody = document.getElementById('assetTable');
+  if (!tbody) return;
+  var rows = tbody.querySelectorAll('tr[draggable]');
+
   rows.forEach(function(row) {
     row.addEventListener('dragstart', function(e) {
-      dragSrcRow = this;
+      _dragSrcRow = this;
       this.classList.add('dragging');
       e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('text/plain', this.dataset.id);
+      try { e.dataTransfer.setData('text/plain', this.dataset.id || ''); } catch (err) { /* IE/Edge 舊版保險 */ }
     });
+
     row.addEventListener('dragend', function() {
       this.classList.remove('dragging');
-      document.querySelectorAll('#assetTable tr').forEach(function(r) { r.classList.remove('drag-over'); });
+      _clearDragOver();
+      _dragSrcRow = null;
+      _dropTargetRow = null;
     });
+
     row.addEventListener('dragover', function(e) {
-      e.preventDefault();
+      if (!_dragSrcRow || this === _dragSrcRow || !this.dataset.id) return;
+      e.preventDefault();                       // 讓 drop 事件能觸發
       e.dataTransfer.dropEffect = 'move';
-      if (this !== dragSrcRow && this.dataset.id) this.classList.add('drag-over');
+      var rect = this.getBoundingClientRect();
+      var after = (e.clientY - rect.top) > rect.height / 2;
+      this.classList.toggle('drag-over-top', !after);
+      this.classList.toggle('drag-over-bottom', after);
+      _dropTargetRow = this;
+      _dropAfter = after;
     });
-    row.addEventListener('dragleave', function() { this.classList.remove('drag-over'); });
+
+    row.addEventListener('dragleave', function() {
+      this.classList.remove('drag-over-top', 'drag-over-bottom');
+    });
+
     row.addEventListener('drop', function(e) {
       e.preventDefault();
-      this.classList.remove('drag-over');
-      if (dragSrcRow === this) return;
-      var fromId = dragSrcRow.dataset.id, toId = this.dataset.id;
+      e.stopPropagation();
+      _clearDragOver();
+      if (!_dragSrcRow || !_dropTargetRow || _dropTargetRow === _dragSrcRow) return;
+
+      var fromId = _dragSrcRow.dataset.id;
+      var toId = _dropTargetRow.dataset.id;
       if (!fromId || !toId) return;
-      var d2 = U(), accts = d2.accounts;
+
+      var d = U(), accts = d.accounts;
       var fromIdx = accts.findIndex(function(a) { return a.id === fromId; });
       var toIdx = accts.findIndex(function(a) { return a.id === toId; });
       if (fromIdx < 0 || toIdx < 0) return;
+
       var item = accts.splice(fromIdx, 1)[0];
+      // fromIdx < toIdx 時 splice 後目標索引往前位移 1
+      if (fromIdx < toIdx) toIdx--;
+      // drop 在目標下半部表示插入到「目標之後」，否則「目標之前」
+      if (_dropAfter) toIdx++;
       accts.splice(toIdx, 0, item);
       save();
       renderAssets();
@@ -1328,7 +1567,7 @@ function renderAssetAnalysisSection() {
   var pendingPayables = (d.receivables || []).filter(function(r) { return r.type === 'payable' && r.status === 'pending'; });
   var tPay = pendingPayables.reduce(function(s, r) { return s + convert(r.amount, r.currency, cur); }, 0);
 
-  // 未收款：從明細記錄加總（未收的 receivable）
+  // 應收款：從明細記錄加總（未收的 receivable）
   var receivableAccts = d.accounts.filter(function(a) { return a.type === 'receivable'; });
   var pendingReceivables = (d.receivables || []).filter(function(r) { return r.type === 'receivable' && r.status === 'pending'; });
   var tRec = pendingReceivables.reduce(function(s, r) { return s + convert(r.amount, r.currency, cur); }, 0);
@@ -1337,20 +1576,20 @@ function renderAssetAnalysisSection() {
   var creditAccts = d.accounts.filter(function(a) { return a.type === 'credit'; });
   var tDebt = creditAccts.reduce(function(s, a) { return s + convert(Math.abs(a.balance), a.currency, cur); }, 0);
 
-  // 總資產 = 正資產 + 未收款（所有擁有的資源）
+  // 總資產 = 正資產 + 應收款（所有擁有的資源）
   var tA = tPositive + tRec;
-  // 淨資產 = 正資產 + 未收款 − 應付款 − 負債（標準 Net Worth 定義，與資產總覽一致）
+  // 淨資產 = 正資產 + 應收款 − 應付款 − 負債（標準 Net Worth 定義，與資產總覽一致）
   var netAsset = tPositive + tRec - tPay - tDebt;
 
   // 統計卡片
   try {
     document.getElementById('aasStats').innerHTML =
       '<div class="stat-card"><div class="label">正資產</div><div class="value c-blue">' + fmt(tPositive, cur) + '</div><div class="sub">銀行+現金+投資+不動產+動產</div></div>' +
-      '<div class="stat-card"><div class="label">淨資產</div><div class="value c-primary">' + fmt(netAsset, cur) + '</div><div class="sub">正資產 + 未收款 − 應付款 − 負債</div></div>' +
+      '<div class="stat-card"><div class="label">淨資產</div><div class="value c-primary">' + fmt(netAsset, cur) + '</div><div class="sub">正資產 + 應收款 − 應付款 − 負債</div></div>' +
       '<div class="stat-card"><div class="label">' + rangeLabel + '收入</div><div class="value c-green">' + fmt(periodInc, cur) + '</div></div>' +
       '<div class="stat-card"><div class="label">' + rangeLabel + '支出</div><div class="value c-red">' + fmt(periodExp, cur) + '</div></div>' +
       '<div class="stat-card"><div class="label">負債（信用卡）</div><div class="value c-red">' + fmt(tDebt, cur) + '</div><div class="sub">' + creditAccts.length + ' 張</div></div>' +
-      '<div class="stat-card"><div class="label">未收款</div><div class="value c-orange">' + fmt(tRec, cur) + '</div><div class="sub">' + pendingReceivables.length + ' 筆未收</div></div>' +
+      '<div class="stat-card"><div class="label">應收款</div><div class="value c-orange">' + fmt(tRec, cur) + '</div><div class="sub">' + pendingReceivables.length + ' 筆未收</div></div>' +
       '<div class="stat-card"><div class="label">應付款</div><div class="value c-red">' + fmt(tPay, cur) + '</div><div class="sub">' + pendingPayables.length + ' 筆未付</div></div>';
   } catch (e) { console.error('統計卡片錯誤:', e); }
 
@@ -1444,9 +1683,9 @@ function renderAssetAnalysisSection() {
 
   // --- 追蹤表 ---
   try {
-    // 未收款追蹤表（從明細記錄）
+    // 應收款追蹤表（從明細記錄）
     document.getElementById('aasReceivableStats').innerHTML =
-      '<div class="stat-card"><div class="label">未收款總計 (' + cur + ')</div>' +
+      '<div class="stat-card"><div class="label">應收款總計 (' + cur + ')</div>' +
       '<div class="value c-orange">' + fmt(tRec, cur) + '</div>' +
       '<div class="sub">' + pendingReceivables.length + ' 筆未收</div></div>';
 
@@ -1456,8 +1695,8 @@ function renderAssetAnalysisSection() {
           (r.target || '-') + '</td><td>' + r.currency + '</td>' +
           '<td class="c-orange" style="font-weight:600">' + fmt(r.amount, r.currency) +
           '</td><td style="color:var(--text3)">' + (r.note || '-') + '</td></tr>';
-      }).join('') : '<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:30px">無未收款記錄</td></tr>';
-  } catch (e) { console.error('未收款追蹤表錯誤:', e); }
+      }).join('') : '<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:30px">無應收款記錄</td></tr>';
+  } catch (e) { console.error('應收款追蹤表錯誤:', e); }
 
   try {
     // 應付款追蹤表（從明細記錄）
@@ -2147,12 +2386,22 @@ function openModal(type, editId) {
     var curOpts5 = Object.entries(CURRENCIES).map(function(entry) {
       return '<option value="' + entry[0] + '"' + (editing5 && editing5.currency === entry[0] ? ' selected' : '') + '>' + entry[0] + ' ' + entry[1] + '</option>';
     }).join('');
+    // 只列可收/付的實體帳戶（排除信用卡/應收/應付帳戶型別）
+    var acctCandidates = d.accounts.filter(function(a) {
+      return a.type === 'bank' || a.type === 'cash' || a.type === 'invest';
+    });
+    var acctOpts5 = '<option value="">（不指定，只記錄不動帳）</option>' +
+      acctCandidates.map(function(a) {
+        return '<option value="' + a.id + '"' + (editing5 && editing5.accountId === a.id ? ' selected' : '') + '>' +
+          a.name + '（' + a.currency + '）</option>';
+      }).join('');
     m.innerHTML = '<h3>' + (editing5 ? '編輯' : '新增') + label + '</h3>' +
       '<div class="form-row"><div class="form-group"><label>建立日期</label><input type="date" id="f_date" value="' + (editing5 ? editing5.date : new Date().toISOString().slice(0, 10)) + '"></div>' +
       '<div class="form-group"><label>應付日期（到期日）</label><input type="date" id="f_dueDate" value="' + (editing5 ? editing5.dueDate || '' : '') + '"></div></div>' +
       '<div class="form-group"><label>' + (isRecv ? '付款對象/機構' : '應付對象/機構') + '</label><input type="text" id="f_target" placeholder="例：張先生 / 台電公司" value="' + (editing5 ? editing5.target || '' : '') + '"></div>' +
       '<div class="form-row"><div class="form-group"><label>金額</label><input type="number" id="f_amt" step="0.01" value="' + (editing5 ? editing5.amount : '') + '"></div>' +
       '<div class="form-group"><label>幣別</label><select id="f_cur">' + curOpts5 + '</select></div></div>' +
+      '<div class="form-group"><label>' + (isRecv ? '收款帳戶' : '付款帳戶') + '<span style="font-size:11px;color:var(--text3);margin-left:8px">點擊「標記已收/已付」時此帳戶會自動增減並寫入收支記錄</span></label><select id="f_acct">' + acctOpts5 + '</select></div>' +
       '<div class="form-group"><label>備註</label><input type="text" id="f_note" value="' + (editing5 ? editing5.note || '' : '') + '"></div>' +
       '<input type="hidden" id="f_editId" value="' + (editId || '') + '">' +
       '<div class="modal-actions"><button class="btn btn-s" onclick="closeModal()">取消</button><button class="btn btn-p" onclick="saveReceivable()">儲存</button></div>';
