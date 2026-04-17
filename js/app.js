@@ -613,6 +613,15 @@ function renderHealthCards(v) {
   var eLv = _healthLevel(emMonths, [6, 3], true);
   var emStr = v.monthExp > 0 ? emMonths.toFixed(1) + ' 個月' : (v.liquid > 0 ? '∞ 本月無支出' : '0 個月');
 
+  // 快速支配資產卡（金額，非比率，無等級評分）
+  var qdCard = '';
+  if (typeof v.quickDisposable === 'number') {
+    qdCard =
+      '<div class="stat-card"><div class="label">快速支配資產</div>' +
+        '<div class="value c-blue">' + fmt(v.quickDisposable, v.cur) + '</div>' +
+        '<div class="sub">銀行 ' + fmt(v.bankAmt, v.cur) + ' + 現金 ' + fmt(v.cashAmt, v.cur) + ' + 投資 ' + fmt(v.investAmt, v.cur) + '</div></div>';
+  }
+
   return (
     '<div class="stat-card"><div class="label">負債比率</div>' +
       '<div class="value ' + dLv.cls + '">' + debtRatioStr + ' <span style="font-size:14px">' + dLv.icon + '</span></div>' +
@@ -622,7 +631,8 @@ function renderHealthCards(v) {
       '<div class="sub">本月儲蓄 ÷ 本月收入｜標準 ≥ 20%｜' + sLv.tip + '</div></div>' +
     '<div class="stat-card"><div class="label">緊急預備金</div>' +
       '<div class="value ' + eLv.cls + '">' + emStr + ' <span style="font-size:14px">' + eLv.icon + '</span></div>' +
-      '<div class="sub">流動資產 ÷ 本月支出｜標準 3–6 個月｜' + eLv.tip + '</div></div>'
+      '<div class="sub">流動資產 ÷ 本月支出｜標準 3–6 個月｜' + eLv.tip + '</div></div>' +
+    qdCard
   );
 }
 
@@ -677,9 +687,12 @@ function renderDashboard() {
     '<div class="stat-card"><div class="label">儲蓄（淨收支）</div><div class="value ' + (net >= 0 ? 'c-green' : 'c-red') + '">' + (net >= 0 ? '+' : '') + fmt(net, cur) + '</div><div class="sub">收入 − 支出</div></div>';
 
   // ======== 第 3 區：財務健康指標 ========
+  // 快速支配資產 = 銀行 + 現金 + 投資（一般情況下 T+2 內可變現的資產）
+  var quickDisposable = bankAmt + cashAmt + investAmt;
   document.getElementById('dashStatsHealth').innerHTML = renderHealthCards({
     totalAsset: totalAsset, totalLiab: totalLiab,
-    income: tI, saving: net, liquid: liquid, monthExp: tE
+    income: tI, saving: net, liquid: liquid, monthExp: tE,
+    quickDisposable: quickDisposable, bankAmt: bankAmt, cashAmt: cashAmt, investAmt: investAmt, cur: cur
   });
 
   // 最近交易
@@ -1466,6 +1479,55 @@ function renderAssetAnalysisSection() {
 // ============ 投資情報 ============
 function renderInvest() { loadNews(); renderPortfolio(); loadStocks(); loadPreciousMetals(); loadCryptoNews(); }
 
+// ------ 股票自動刷新機制 ------
+var _lastStockRefresh = null;  // timestamp (ms) of last successful refresh
+var _stockRefreshTimer = null; // setInterval handle
+
+/** 台股開盤判斷：週一～五 09:00–13:30（本地時間），不考慮國定假日。 */
+function isTwStockMarketOpen() {
+  var now = new Date();
+  var day = now.getDay();          // 0=Sun, 6=Sat
+  if (day === 0 || day === 6) return false;
+  var mins = now.getHours() * 60 + now.getMinutes();
+  return mins >= 9 * 60 && mins <= 13 * 60 + 30;
+}
+
+/** 更新畫面上的「最後刷新時間」提示。 */
+function updateStockRefreshInfo() {
+  var el = document.getElementById('stockRefreshInfo');
+  if (!el) return;
+  var openStatus = isTwStockMarketOpen() ? '開盤中 · 每 10 分鐘自動刷新' : '休市中 · 自動刷新已暫停';
+  if (!_lastStockRefresh) {
+    el.textContent = '尚未刷新｜' + openStatus;
+    return;
+  }
+  var t = new Date(_lastStockRefresh);
+  var hh = String(t.getHours()).padStart(2, '0');
+  var mm = String(t.getMinutes()).padStart(2, '0');
+  var ss = String(t.getSeconds()).padStart(2, '0');
+  el.textContent = '最後刷新：' + hh + ':' + mm + ':' + ss + '｜' + openStatus;
+}
+
+/** 每分鐘 tick：開盤中 + 已在投資頁 + 距上次刷新 ≥ 10 分鐘 → 觸發刷新。 */
+function stockRefreshTick() {
+  updateStockRefreshInfo();  // 每分鐘至少更新一次「開盤/休市」狀態
+  if (!isTwStockMarketOpen()) return;
+  var invPage = document.getElementById('page-invest');
+  if (!invPage || !invPage.classList.contains('active')) return;
+  var now = Date.now();
+  if (_lastStockRefresh && now - _lastStockRefresh < 10 * 60 * 1000) return;
+  loadStocks();
+  renderPortfolio();
+}
+
+/** 啟動自動刷新定時器（每分鐘 tick 一次，由 stockRefreshTick 控節奏）。 */
+function startStockAutoRefresh() {
+  if (_stockRefreshTimer) return;
+  _stockRefreshTimer = setInterval(stockRefreshTick, 60 * 1000);
+  // 頁面載入時先跑一次以更新顯示
+  updateStockRefreshInfo();
+}
+
 async function loadNews() {
   var el = document.getElementById('newsContainer');
   el.innerHTML = '<p style="color:var(--text3)">載入中...</p>';
@@ -1608,7 +1670,7 @@ async function loadStocks() {
     }
   }
 
-  // 有成功取得至少一筆 → 渲染
+  // 有成功取得至少一筆 → 渲染並記錄刷新時間
   if (allResults.length > 0) {
     var failedCodes = d.watchStocks.filter(function(c) { return loadedCodes.indexOf(c) === -1; });
     // 按照原始追蹤順序排列
@@ -1616,6 +1678,8 @@ async function loadStocks() {
       return d.watchStocks.indexOf(a.code) - d.watchStocks.indexOf(b.code);
     });
     el.innerHTML = renderCards(allResults, failedCodes);
+    _lastStockRefresh = Date.now();
+    updateStockRefreshInfo();
     return;
   }
 
@@ -2626,6 +2690,9 @@ function resetBillScanner() {
 
 // 點擊上傳區域
 document.addEventListener('DOMContentLoaded', function() {
+  // 啟動股票開盤自動刷新（每分鐘 tick，實際刷新節奏 10 分鐘 + 需在投資頁 + 開盤中）
+  startStockAutoRefresh();
+
   var uploadArea = document.getElementById('billUploadArea');
   if (uploadArea) {
     uploadArea.addEventListener('click', function() {
