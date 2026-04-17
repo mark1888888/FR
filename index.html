@@ -76,6 +76,10 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
       <span>投資情報</span>
     </div>
+    <div class="nav-item" data-page="planning" onclick="switchPage('planning')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>
+      <span>財務規劃</span>
+    </div>
     <div class="nav-item" data-page="currency" onclick="switchPage('currency')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M15 9.354a4 4 0 10 0 5.292M12 7v1M12 16v1"/></svg>
       <span>匯率換算</span>
@@ -452,6 +456,18 @@
       </div>
     </div>
 
+    <!-- ==================== 財務規劃 ==================== -->
+    <div class="page" id="page-planning">
+      <div class="page-title">財務規劃</div>
+      <div class="tab-bar">
+        <button class="tab-btn active" onclick="switchPlanTab('projects',this)">專案標籤</button>
+        <button class="tab-btn" onclick="switchPlanTab('recurring',this)">定期收支</button>
+        <button class="tab-btn" onclick="switchPlanTab('goals',this)">儲蓄目標</button>
+        <button class="tab-btn" onclick="switchPlanTab('tax',this)">稅務預估</button>
+      </div>
+      <div id="planContent"></div>
+    </div>
+
     <!-- ==================== 匯率換算 ==================== -->
     <div class="page" id="page-currency">
       <div class="page-title">匯率換算</div>
@@ -606,6 +622,14 @@
 <div class="modal-overlay" id="billScannerOverlay" onclick="if(event.target===this)closeBillScanner()">
   <div class="modal" style="max-width:600px">
     <h3>📷 信用卡帳單掃描</h3>
+    <div id="billCardPickerArea" style="margin-bottom:16px">
+      <label style="display:block;font-size:12px;color:var(--text2);margin-bottom:6px">先選擇要歸屬的信用卡</label>
+      <select id="billCardSelect" style="width:100%" onchange="onBillCardChange()"></select>
+      <div id="billCardEmpty" style="display:none;background:rgba(245,158,11,.1);border:1px solid var(--orange);border-radius:8px;padding:12px;margin-top:8px;font-size:13px;color:var(--orange)">
+        尚無信用卡帳戶。請先至「資產管理 → 信用卡」新增一張信用卡，再回來掃描帳單。
+        <button class="btn btn-s btn-sm" style="margin-left:8px" onclick="closeBillScanner();switchPage('assets');setTimeout(function(){switchAssetTab('credit',document.querySelector('[onclick*=credit]'));openModal('account');},200)">去新增</button>
+      </div>
+    </div>
     <div id="billUploadArea" class="bill-upload-area">
       <div class="bill-upload-icon">📄</div>
       <p>點擊或拖曳上傳信用卡帳單圖片</p>
