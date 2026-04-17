@@ -726,21 +726,22 @@ function renderDashboard() {
   var net = tI - tE;
 
   // ======== 資產負債表：按流動性分類 ========
-  // 流動資產 = 現金 + 銀行存款 + 應收款
+  // 流動資產 = 現金 + 銀行存款 + 投資 + 應收款
+  //   （投資：股票/基金/ETF T+2 內可變現，視為流動資產）
   var cashAmt = d.accounts.filter(function(a) { return a.type === 'cash'; })
     .reduce(function(s, a) { return s + convert(a.balance, a.currency, cur); }, 0);
   var bankAmt = d.accounts.filter(function(a) { return a.type === 'bank'; })
     .reduce(function(s, a) { return s + convert(a.balance, a.currency, cur); }, 0);
-  var rec = (d.receivables || []).filter(function(r) { return r.type === 'receivable' && r.status === 'pending'; })
-    .reduce(function(s, r) { return s + convert(r.amount, r.currency, cur); }, 0);
-  var liquid = cashAmt + bankAmt + rec;
-
-  // 非流動資產 = 投資 + 不動產現值 + 動產現值
   var investAmt = d.accounts.filter(function(a) { return a.type === 'invest'; })
     .reduce(function(s, a) { return s + convert(a.balance, a.currency, cur); }, 0);
+  var rec = (d.receivables || []).filter(function(r) { return r.type === 'receivable' && r.status === 'pending'; })
+    .reduce(function(s, r) { return s + convert(r.amount, r.currency, cur); }, 0);
+  var liquid = cashAmt + bankAmt + investAmt + rec;
+
+  // 非流動資產 = 不動產現值 + 動產現值
   var propertyAmt = (d.properties || []).reduce(function(s, p) { return s + convert(p.currentValue || 0, p.currency || 'TWD', cur); }, 0);
   var vehicleAmt = (d.vehicles || []).reduce(function(s, v) { return s + convert(v.currentValue || 0, v.currency || 'TWD', cur); }, 0);
-  var nonLiquid = investAmt + propertyAmt + vehicleAmt;
+  var nonLiquid = propertyAmt + vehicleAmt;
 
   // 負債 = 信用卡 + 應付款
   var debt = d.accounts.filter(function(a) { return a.type === 'credit'; })
@@ -755,8 +756,8 @@ function renderDashboard() {
   // ======== 第 1 區：資產負債表（存量）— 4 張卡 ========
   document.getElementById('dashStatsAssets').innerHTML =
     '<div class="stat-card"><div class="label">淨資產</div><div class="value c-primary">' + fmt(netA, cur) + '</div><div class="sub">總資產 − 總負債</div></div>' +
-    '<div class="stat-card"><div class="label">流動資產</div><div class="value c-blue">' + fmt(liquid, cur) + '</div><div class="sub">現金 ' + fmt(cashAmt, cur) + ' + 銀行 ' + fmt(bankAmt, cur) + ' + 應收 ' + fmt(rec, cur) + '</div></div>' +
-    '<div class="stat-card"><div class="label">非流動資產</div><div class="value c-blue">' + fmt(nonLiquid, cur) + '</div><div class="sub">投資 ' + fmt(investAmt, cur) + ' + 不動產 ' + fmt(propertyAmt, cur) + ' + 動產 ' + fmt(vehicleAmt, cur) + '</div></div>' +
+    '<div class="stat-card"><div class="label">流動資產</div><div class="value c-blue">' + fmt(liquid, cur) + '</div><div class="sub">現金 ' + fmt(cashAmt, cur) + ' + 銀行 ' + fmt(bankAmt, cur) + ' + 投資 ' + fmt(investAmt, cur) + ' + 應收 ' + fmt(rec, cur) + '</div></div>' +
+    '<div class="stat-card"><div class="label">非流動資產</div><div class="value c-blue">' + fmt(nonLiquid, cur) + '</div><div class="sub">不動產 ' + fmt(propertyAmt, cur) + ' + 動產 ' + fmt(vehicleAmt, cur) + '</div></div>' +
     '<div class="stat-card"><div class="label">總負債</div><div class="value c-red">' + fmt(totalLiab, cur) + '</div><div class="sub">信用卡 ' + fmt(debt, cur) + ' + 應付款 ' + fmt(pay, cur) + '</div></div>';
 
   // ======== 第 2 區：收支儲蓄表（流量）— 3 張卡 ========
