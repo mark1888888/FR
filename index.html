@@ -202,7 +202,7 @@
         </div>
       </div>
       <div class="chart-container">
-        <h3>未收款追蹤</h3>
+        <h3>應收款追蹤</h3>
         <div class="stat-grid" id="aasReceivableStats"></div>
         <div class="table-scroll-wrap">
           <table>
@@ -282,7 +282,7 @@
         <button class="tab-btn active" onclick="switchAssetTab('bank',this)">銀行存款</button>
         <button class="tab-btn" onclick="switchAssetTab('cash',this)">現金</button>
         <button class="tab-btn" onclick="switchAssetTab('credit',this)">信用卡</button>
-        <button class="tab-btn" onclick="switchAssetTab('receivable',this)">未收款</button>
+        <button class="tab-btn" onclick="switchAssetTab('receivable',this)">應收款</button>
         <button class="tab-btn" onclick="switchAssetTab('payable',this)">應付款</button>
         <button class="tab-btn" onclick="switchAssetTab('property',this)">不動產</button>
         <button class="tab-btn" onclick="switchAssetTab('vehicle',this)">動產</button>
@@ -292,7 +292,7 @@
         <button class="btn btn-p" id="assetAddBtn" onclick="openAssetModal()">+ 新增帳戶</button>
       </div>
       <div class="stat-grid" id="assetStats"></div>
-      <div class="table-wrap">
+      <div class="table-wrap" id="assetAccountWrap">
         <div class="table-header"><h3 id="assetTableTitle">銀行存款帳戶</h3></div>
         <div class="table-scroll-wrap">
           <table>
@@ -310,7 +310,7 @@
           </div>
           <div class="table-scroll-wrap">
             <table>
-              <thead><tr><th>建立日期</th><th>應付日期</th><th>狀態</th><th>對象/機構</th><th>說明</th><th>金額</th><th>幣別</th><th>操作</th></tr></thead>
+              <thead><tr><th>建立日期</th><th>應付日期</th><th>狀態</th><th>對象/機構</th><th>說明</th><th>金額</th><th>幣別</th><th>連動帳戶</th><th>操作</th></tr></thead>
               <tbody id="recvTable"></tbody>
             </table>
           </div>
