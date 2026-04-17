@@ -50,7 +50,7 @@
     <div class="user-info" id="sidebarUser"></div>
     <div class="nav-item active" data-page="dashboard" onclick="switchPage('dashboard')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
-      <span>總覽</span>
+      <span>資產總覽</span>
     </div>
     <div class="nav-item" data-page="income" onclick="switchPage('income')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 7l-5-5-5 5"/></svg>
@@ -96,7 +96,7 @@
 
     <!-- ==================== 總覽 ==================== -->
     <div class="page active" id="page-dashboard">
-      <div class="page-title">總覽</div>
+      <div class="page-title">資產總覽</div>
       <div class="filter-bar">
         <select id="dashMonth" onchange="renderDashboard()"></select>
         <select id="dashCurrency" onchange="renderDashboard()">
@@ -176,9 +176,15 @@
           </div>
         </div>
       </div>
-      <div class="chart-container">
-        <h3>各帳戶餘額排行</h3>
-        <div id="aasAcctBar"></div>
+      <div class="dual-grid">
+        <div class="chart-container">
+          <h3>銀行存款排行</h3>
+          <div id="aasBankBar"></div>
+        </div>
+        <div class="chart-container">
+          <h3>現金排行</h3>
+          <div id="aasCashBar"></div>
+        </div>
       </div>
       <div class="dual-grid">
         <div class="chart-container">
@@ -273,6 +279,8 @@
         <button class="tab-btn" onclick="switchAssetTab('credit',this)">信用卡</button>
         <button class="tab-btn" onclick="switchAssetTab('receivable',this)">未收款</button>
         <button class="tab-btn" onclick="switchAssetTab('payable',this)">應付款</button>
+        <button class="tab-btn" onclick="switchAssetTab('property',this)">不動產</button>
+        <button class="tab-btn" onclick="switchAssetTab('vehicle',this)">動產</button>
         <button class="tab-btn" onclick="switchAssetTab('invest',this)">投資/其他</button>
       </div>
       <div class="btn-group" style="margin-bottom:20px">
@@ -410,6 +418,19 @@
         <div id="metalsContainer"><p style="color:var(--text3)">載入中...</p></div>
       </div>
       <div class="chart-container">
+        <h3>我的投資組合</h3>
+        <div class="filter-bar" style="margin-bottom:12px">
+          <button class="btn btn-p btn-sm" onclick="openModal('portfolio')">+ 新增持倉</button>
+        </div>
+        <div class="stat-grid" id="portfolioStats"></div>
+        <div class="table-scroll-wrap">
+          <table>
+            <thead><tr><th>類型</th><th>代號</th><th>名稱</th><th>持有數</th><th>成本價</th><th>總成本</th><th>現價</th><th>市值</th><th>損益</th><th></th></tr></thead>
+            <tbody id="portfolioTable"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="chart-container">
         <h3>台股追蹤</h3>
         <div class="filter-bar" style="margin-bottom:12px">
           <input type="text" id="addStockInput" placeholder="輸入股票代號 (如 2330)" style="width:200px">
@@ -520,7 +541,7 @@
   <div class="bottom-nav" id="bottomNav">
     <div class="bottom-nav-item active" data-page="dashboard" onclick="switchPage('dashboard')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
-      <span>總覽</span>
+      <span>資產總覽</span>
     </div>
     <div class="bottom-nav-item" data-page="income" onclick="switchPage('income')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 7l-5-5-5 5"/></svg>
