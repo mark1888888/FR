@@ -436,10 +436,14 @@
         </div>
       </div>
       <div class="chart-container">
-        <h3>台股追蹤</h3>
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px">
+          <h3 style="margin:0">台股追蹤</h3>
+          <div id="stockRefreshInfo" style="font-size:12px;color:var(--text3)">尚未刷新</div>
+        </div>
         <div class="filter-bar" style="margin-bottom:12px">
           <input type="text" id="addStockInput" placeholder="輸入股票代號 (如 2330)" style="width:200px">
           <button class="btn btn-p btn-sm" onclick="addWatchStock()">+ 追蹤</button>
+          <button class="btn btn-s btn-sm" onclick="loadStocks();renderPortfolio();" title="立即刷新股價">↻ 手動刷新</button>
         </div>
         <div id="stockContainer"><p style="color:var(--text3)">尚未追蹤任何股票</p></div>
       </div>
