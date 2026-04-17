@@ -45,7 +45,7 @@ function getIcon(cat) {
 const DEFAULT_INC_CATS = ['薪資','獎金','投資收益','兼職','利息','其他收入'];
 const DEFAULT_EXP_CATS = ['餐飲','交通','購物','娛樂','醫療','教育','居住','日用品','通訊','保險','其他支出'];
 const CURRENCIES = { TWD:'新台幣', USD:'美元', JPY:'日圓', EUR:'歐元', CNY:'人民幣', KRW:'韓元', HKD:'港幣' };
-const ACCOUNT_TYPES = { bank:'銀行存款', cash:'現金', credit:'信用卡', receivable:'未收款', payable:'應付款', invest:'投資/其他' };
+const ACCOUNT_TYPES = { bank:'銀行存款', cash:'現金', credit:'信用卡', receivable:'未收款', payable:'應付款', invest:'投資/其他', property:'不動產', vehicle:'動產' };
 const PIE_COLORS = ['#6c63ff','#00d2ff','#22c55e','#f59e0b','#ef4444','#ec4899','#8b5cf6','#14b8a6','#f97316','#64748b','#a855f7','#06b6d4'];
 
 let rates = { TWD:1, USD:0.0313, JPY:4.69, EUR:0.0289, CNY:0.2273, KRW:44.5, HKD:0.244 };
@@ -93,6 +93,7 @@ function defaultUserData() {
     categoryIcons: {},
     subCategories: {},   // { '教育': ['學費','午餐費','多元課程費'], '餐飲': ['外食','飲料'] }
     receivables: [],     // 應收款記錄
+    portfolio: [],       // 投資組合 { id, type:'stock'|'fund'|'other', code, name, costPerUnit, units, currency, note }
     updated_at: new Date().toISOString()
   };
 }
@@ -579,14 +580,17 @@ function renderDashboard() {
   var tE = sumConverted(exp, 'amount', cur);
   var net = tI - tE;
 
-  // Bug 2 修正：payable 使用 Math.abs 確保正確計算
-  var tA = d.accounts.filter(function(a) { return a.type !== 'payable'; })
+  // 資產計算：正資產（bank+cash+invest+property+vehicle）
+  var tA = d.accounts.filter(function(a) { return a.type === 'bank' || a.type === 'cash' || a.type === 'invest' || a.type === 'property' || a.type === 'vehicle'; })
     .reduce(function(s, a) { return s + convert(a.balance, a.currency, cur); }, 0);
-  var rec = d.accounts.filter(function(a) { return a.type === 'receivable'; })
-    .reduce(function(s, a) { return s + convert(a.balance, a.currency, cur); }, 0);
-  var pay = d.accounts.filter(function(a) { return a.type === 'payable'; })
+  // 未收款/應付款：從明細記錄加總
+  var rec = (d.receivables || []).filter(function(r) { return r.type === 'receivable' && r.status === 'pending'; })
+    .reduce(function(s, r) { return s + convert(r.amount, r.currency, cur); }, 0);
+  var pay = (d.receivables || []).filter(function(r) { return r.type === 'payable' && r.status === 'pending'; })
+    .reduce(function(s, r) { return s + convert(r.amount, r.currency, cur); }, 0);
+  var debt = d.accounts.filter(function(a) { return a.type === 'credit'; })
     .reduce(function(s, a) { return s + convert(Math.abs(a.balance), a.currency, cur); }, 0);
-  var netA = tA - rec - pay;
+  var netA = tA + rec - pay - debt;
 
   document.getElementById('dashStats').innerHTML =
     '<div class="stat-card"><div class="label">總資產</div><div class="value c-blue">' + fmt(tA, cur) + '</div></div>' +
@@ -807,7 +811,8 @@ function renderAssets() {
   var list = d.accounts.filter(function(a) { return a.type === currentAssetTab; });
   var titles = {
     bank: '銀行存款帳戶', cash: '現金帳戶', credit: '信用卡帳戶',
-    receivable: '未收款帳戶', payable: '應付款帳戶', invest: '投資/其他資產'
+    receivable: '未收款帳戶', payable: '應付款帳戶', invest: '投資/其他資產',
+    property: '不動產', vehicle: '動產'
   };
   document.getElementById('assetTableTitle').textContent = titles[currentAssetTab];
 
@@ -1066,20 +1071,22 @@ function renderAssetAnalysisSection() {
   var periodExp = sumConverted(expF, 'amount', cur);
   var rangeLabel = range === 'year' ? '本年度' : range === 'month' ? '本月' : '全部';
 
-  // Bug 3：分類計算
-  // 正資產：bank, cash, invest
+  // 分類計算
+  // 正資產：bank, cash, invest, property, vehicle
   var positiveAccts = d.accounts.filter(function(a) {
-    return a.type === 'bank' || a.type === 'cash' || a.type === 'invest';
+    return a.type === 'bank' || a.type === 'cash' || a.type === 'invest' || a.type === 'property' || a.type === 'vehicle';
   });
   var tPositive = positiveAccts.reduce(function(s, a) { return s + convert(a.balance, a.currency, cur); }, 0);
 
-  // 應付款：payable
+  // 應付款：從明細記錄加總（未付的 payable）
   var payableAccts = d.accounts.filter(function(a) { return a.type === 'payable'; });
-  var tPay = payableAccts.reduce(function(s, a) { return s + convert(Math.abs(a.balance), a.currency, cur); }, 0);
+  var pendingPayables = (d.receivables || []).filter(function(r) { return r.type === 'payable' && r.status === 'pending'; });
+  var tPay = pendingPayables.reduce(function(s, r) { return s + convert(r.amount, r.currency, cur); }, 0);
 
-  // 未收款：receivable
+  // 未收款：從明細記錄加總（未收的 receivable）
   var receivableAccts = d.accounts.filter(function(a) { return a.type === 'receivable'; });
-  var tRec = receivableAccts.reduce(function(s, a) { return s + convert(a.balance, a.currency, cur); }, 0);
+  var pendingReceivables = (d.receivables || []).filter(function(r) { return r.type === 'receivable' && r.status === 'pending'; });
+  var tRec = pendingReceivables.reduce(function(s, r) { return s + convert(r.amount, r.currency, cur); }, 0);
 
   // 負債：credit
   var creditAccts = d.accounts.filter(function(a) { return a.type === 'credit'; });
@@ -1096,8 +1103,8 @@ function renderAssetAnalysisSection() {
     '<div class="stat-card"><div class="label">' + rangeLabel + '收入</div><div class="value c-green">' + fmt(periodInc, cur) + '</div></div>' +
     '<div class="stat-card"><div class="label">' + rangeLabel + '支出</div><div class="value c-red">' + fmt(periodExp, cur) + '</div></div>' +
     '<div class="stat-card"><div class="label">負債（信用卡）</div><div class="value c-red">' + fmt(tDebt, cur) + '</div><div class="sub">' + creditAccts.length + ' 張</div></div>' +
-    '<div class="stat-card"><div class="label">未收款</div><div class="value c-orange">' + fmt(tRec, cur) + '</div><div class="sub">' + receivableAccts.length + ' 筆</div></div>' +
-    '<div class="stat-card"><div class="label">應付款</div><div class="value c-red">' + fmt(tPay, cur) + '</div><div class="sub">' + payableAccts.length + ' 筆</div></div>';
+    '<div class="stat-card"><div class="label">未收款</div><div class="value c-orange">' + fmt(tRec, cur) + '</div><div class="sub">' + pendingReceivables.length + ' 筆未收</div></div>' +
+    '<div class="stat-card"><div class="label">應付款</div><div class="value c-red">' + fmt(tPay, cur) + '</div><div class="sub">' + pendingPayables.length + ' 筆未付</div></div>';
 
   // Bug 3：正資產圓餅圖
   var posMap = {};
@@ -1139,9 +1146,18 @@ function renderAssetAnalysisSection() {
     Object.entries(payMap).sort(function(a, b) { return b[1] - a[1]; }), cur
   );
 
-  // 各帳戶餘額排行（排除信用卡、未收款、應付款）
-  drawBarChart('aasAcctBar',
-    d.accounts.filter(function(a) { return a.type !== 'credit' && a.type !== 'receivable' && a.type !== 'payable'; })
+  // 銀行存款排行
+  drawBarChart('aasBankBar',
+    d.accounts.filter(function(a) { return a.type === 'bank'; })
+    .map(function(a) {
+      return [a.name + ' (' + a.currency + ')', convert(a.balance, a.currency, cur)];
+    }).sort(function(a, b) { return b[1] - a[1]; }),
+    cur
+  );
+
+  // 現金排行
+  drawBarChart('aasCashBar',
+    d.accounts.filter(function(a) { return a.type === 'cash'; })
     .map(function(a) {
       return [a.name + ' (' + a.currency + ')', convert(a.balance, a.currency, cur)];
     }).sort(function(a, b) { return b[1] - a[1]; }),
@@ -1164,39 +1180,39 @@ function renderAssetAnalysisSection() {
     cur
   );
 
-  // 未收款追蹤表
-  var recT = receivableAccts.reduce(function(s, a) { return s + convert(a.balance, a.currency, cur); }, 0);
+  // 未收款追蹤表（從明細記錄）
   document.getElementById('aasReceivableStats').innerHTML =
     '<div class="stat-card"><div class="label">未收款總計 (' + cur + ')</div>' +
-    '<div class="value c-orange">' + fmt(recT, cur) + '</div>' +
-    '<div class="sub">' + receivableAccts.length + ' 筆</div></div>';
+    '<div class="value c-orange">' + fmt(tRec, cur) + '</div>' +
+    '<div class="sub">' + pendingReceivables.length + ' 筆未收</div></div>';
 
-  document.getElementById('aasReceivableTable').innerHTML = receivableAccts.length ?
-    receivableAccts.map(function(a) {
-      return '<tr><td style="font-weight:600">' + a.name + '</td><td>' +
-        (a.institution || '-') + '</td><td>' + a.currency + '</td>' +
-        '<td class="c-orange" style="font-weight:600">' + fmt(a.balance, a.currency) +
-        '</td><td style="color:var(--text3)">' + (a.note || '-') + '</td></tr>';
+  document.getElementById('aasReceivableTable').innerHTML = pendingReceivables.length ?
+    pendingReceivables.map(function(r) {
+      var acct = d.accounts.find(function(a) { return a.id === r.accountId; });
+      return '<tr><td style="font-weight:600">' + (acct ? acct.name : '-') + '</td><td>' +
+        (r.target || '-') + '</td><td>' + r.currency + '</td>' +
+        '<td class="c-orange" style="font-weight:600">' + fmt(r.amount, r.currency) +
+        '</td><td style="color:var(--text3)">' + (r.note || '-') + '</td></tr>';
     }).join('') : '<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:30px">無未收款記錄</td></tr>';
 
-  // Bug 3：應付款追蹤表
-  var payT = payableAccts.reduce(function(s, a) { return s + convert(Math.abs(a.balance), a.currency, cur); }, 0);
+  // 應付款追蹤表（從明細記錄）
   document.getElementById('aasPayableStats').innerHTML =
     '<div class="stat-card"><div class="label">應付款總計 (' + cur + ')</div>' +
-    '<div class="value c-red">' + fmt(payT, cur) + '</div>' +
-    '<div class="sub">' + payableAccts.length + ' 筆</div></div>';
+    '<div class="value c-red">' + fmt(tPay, cur) + '</div>' +
+    '<div class="sub">' + pendingPayables.length + ' 筆未付</div></div>';
 
-  document.getElementById('aasPayableTable').innerHTML = payableAccts.length ?
-    payableAccts.map(function(a) {
-      return '<tr><td style="font-weight:600">' + a.name + '</td><td>' +
-        (a.institution || '-') + '</td><td>' + a.currency + '</td>' +
-        '<td class="c-red" style="font-weight:600">' + fmt(Math.abs(a.balance), a.currency) +
-        '</td><td style="color:var(--text3)">' + (a.note || '-') + '</td></tr>';
+  document.getElementById('aasPayableTable').innerHTML = pendingPayables.length ?
+    pendingPayables.map(function(r) {
+      var acct = d.accounts.find(function(a) { return a.id === r.accountId; });
+      return '<tr><td style="font-weight:600">' + (acct ? acct.name : '-') + '</td><td>' +
+        (r.target || '-') + '</td><td>' + r.currency + '</td>' +
+        '<td class="c-red" style="font-weight:600">' + fmt(r.amount, r.currency) +
+        '</td><td style="color:var(--text3)">' + (r.note || '-') + '</td></tr>';
     }).join('') : '<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:30px">無應付款記錄</td></tr>';
 }
 
 // ============ 投資情報 ============
-function renderInvest() { loadNews(); loadStocks(); loadPreciousMetals(); loadCryptoNews(); }
+function renderInvest() { loadNews(); renderPortfolio(); loadStocks(); loadPreciousMetals(); loadCryptoNews(); }
 
 async function loadNews() {
   var el = document.getElementById('newsContainer');
@@ -1427,6 +1443,106 @@ function removeStock(code) {
   d.watchStocks = d.watchStocks.filter(function(c) { return c !== code; });
   save();
   loadStocks();
+}
+
+// ============ 投資組合管理 ============
+var _portfolioPrices = {}; // 暫存即時股價 { code: price }
+
+async function renderPortfolio() {
+  var d = U();
+  if (!d.portfolio) d.portfolio = [];
+  var tb = document.getElementById('portfolioTable');
+  var stats = document.getElementById('portfolioStats');
+  if (!tb) return;
+
+  // 收集需要查詢即時股價的代號
+  var stockCodes = d.portfolio.filter(function(p) { return p.type === 'stock' && p.code; }).map(function(p) { return p.code; });
+
+  // 查詢 TWSE 即時價格
+  if (stockCodes.length > 0) {
+    try {
+      var tseQ = stockCodes.map(function(c) { return 'tse_' + c + '.tw'; }).join('|');
+      var otcQ = stockCodes.map(function(c) { return 'otc_' + c + '.tw'; }).join('|');
+      var r = await fetch('https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=' + tseQ + '|' + otcQ + '&json=1&_=' + Date.now());
+      var data = await r.json();
+      if (data.msgArray) {
+        data.msgArray.forEach(function(s) {
+          var price = parseFloat(s.z) || parseFloat(s.y) || 0;
+          if (price > 0) _portfolioPrices[s.c] = price;
+        });
+      }
+    } catch (e) { /* 靜默 */ }
+  }
+
+  var totalCost = 0, totalValue = 0;
+  var typeLabels = { stock: '股票', fund: '基金', other: '其他' };
+
+  tb.innerHTML = d.portfolio.length ? d.portfolio.map(function(p) {
+    var cost = (p.costPerUnit || 0) * (p.units || 0);
+    var currentPrice = _portfolioPrices[p.code] || 0;
+    var marketVal = currentPrice > 0 ? currentPrice * (p.units || 0) : cost;
+    var pnl = marketVal - cost;
+    var pnlPct = cost > 0 ? ((pnl / cost) * 100) : 0;
+    totalCost += cost;
+    totalValue += marketVal;
+    var pnlColor = pnl >= 0 ? 'c-green' : 'c-red';
+    var priceStr = currentPrice > 0 ? fmt(currentPrice, p.currency || 'TWD') : '<span style="color:var(--text3)">--</span>';
+    return '<tr>' +
+      '<td><span class="tag">' + (typeLabels[p.type] || p.type) + '</span></td>' +
+      '<td style="font-weight:600">' + (p.code || '-') + '</td>' +
+      '<td>' + (p.name || '-') + '</td>' +
+      '<td>' + (p.units || 0) + '</td>' +
+      '<td>' + fmt(p.costPerUnit || 0, p.currency || 'TWD') + '</td>' +
+      '<td>' + fmt(cost, p.currency || 'TWD') + '</td>' +
+      '<td>' + priceStr + '</td>' +
+      '<td style="font-weight:600">' + fmt(marketVal, p.currency || 'TWD') + '</td>' +
+      '<td class="' + pnlColor + '" style="font-weight:600">' + (pnl >= 0 ? '+' : '') + fmt(pnl, p.currency || 'TWD') +
+      '<div style="font-size:11px">(' + (pnl >= 0 ? '+' : '') + pnlPct.toFixed(2) + '%)</div></td>' +
+      '<td><span class="edit-btn" onclick="editPortfolio(\'' + p.id + '\')">✏️</span>' +
+      '<span class="del-btn" onclick="deletePortfolio(\'' + p.id + '\')">✕</span></td></tr>';
+  }).join('') : '<tr><td colspan="10" style="text-align:center;color:var(--text3);padding:40px">尚無投資持倉記錄</td></tr>';
+
+  var totalPnl = totalValue - totalCost;
+  if (stats) {
+    stats.innerHTML =
+      '<div class="stat-card"><div class="label">總成本</div><div class="value c-blue">' + fmt(totalCost, 'TWD') + '</div></div>' +
+      '<div class="stat-card"><div class="label">總市值</div><div class="value c-primary">' + fmt(totalValue, 'TWD') + '</div></div>' +
+      '<div class="stat-card"><div class="label">總損益</div><div class="value ' + (totalPnl >= 0 ? 'c-green' : 'c-red') + '">' + (totalPnl >= 0 ? '+' : '') + fmt(totalPnl, 'TWD') + '</div></div>';
+  }
+}
+
+function savePortfolio() {
+  var d = U();
+  if (!d.portfolio) d.portfolio = [];
+  var editId = document.getElementById('f_editId').value;
+  var obj = {
+    id: editId || genId(),
+    type: document.getElementById('f_pType').value,
+    code: document.getElementById('f_pCode').value.trim(),
+    name: document.getElementById('f_pName').value.trim(),
+    costPerUnit: parseFloat(document.getElementById('f_pCost').value) || 0,
+    units: parseFloat(document.getElementById('f_pUnits').value) || 0,
+    currency: document.getElementById('f_pCur').value,
+    note: document.getElementById('f_pNote').value.trim()
+  };
+  if (editId) {
+    var existing = d.portfolio.find(function(p) { return p.id === editId; });
+    if (existing) Object.assign(existing, obj);
+  } else {
+    d.portfolio.push(obj);
+  }
+  save(); closeModal(); renderPortfolio();
+  showToast('✅ 持倉記錄已儲存', 'success');
+}
+
+function editPortfolio(id) { openModal('portfolio', id); }
+
+function deletePortfolio(id) {
+  showConfirmModal('確定刪除此持倉記錄？', function() {
+    var d = U();
+    d.portfolio = (d.portfolio || []).filter(function(p) { return p.id !== id; });
+    save(); renderPortfolio();
+  });
 }
 
 // ============ 圖表繪製輔助函式 ============
@@ -1707,6 +1823,25 @@ function openModal(type, editId) {
       '<div class="form-group"><label>備註</label><input type="text" id="f_note" value="' + (editing5 ? editing5.note || '' : '') + '"></div>' +
       '<input type="hidden" id="f_editId" value="' + (editId || '') + '">' +
       '<div class="modal-actions"><button class="btn btn-s" onclick="closeModal()">取消</button><button class="btn btn-p" onclick="saveReceivable()">儲存</button></div>';
+  } else if (type === 'portfolio') {
+    var editing6 = editId ? (d.portfolio || []).find(function(p) { return p.id === editId; }) : null;
+    var curOpts6 = Object.entries(CURRENCIES).map(function(entry) {
+      return '<option value="' + entry[0] + '"' + (editing6 && editing6.currency === entry[0] ? ' selected' : '') + '>' + entry[0] + ' ' + entry[1] + '</option>';
+    }).join('');
+    m.innerHTML = '<h3>' + (editing6 ? '編輯' : '新增') + '投資持倉</h3>' +
+      '<div class="form-row"><div class="form-group"><label>類型</label><select id="f_pType">' +
+        '<option value="stock"' + (editing6 && editing6.type === 'stock' ? ' selected' : '') + '>股票</option>' +
+        '<option value="fund"' + (editing6 && editing6.type === 'fund' ? ' selected' : '') + '>基金</option>' +
+        '<option value="other"' + (editing6 && editing6.type === 'other' ? ' selected' : '') + '>其他</option>' +
+      '</select></div>' +
+      '<div class="form-group"><label>代號</label><input type="text" id="f_pCode" placeholder="如 2330、0050" value="' + (editing6 ? editing6.code || '' : '') + '"></div></div>' +
+      '<div class="form-group"><label>名稱</label><input type="text" id="f_pName" placeholder="如 台積電" value="' + (editing6 ? editing6.name || '' : '') + '"></div>' +
+      '<div class="form-row"><div class="form-group"><label>購入成本（每股/每份）</label><input type="number" id="f_pCost" step="0.01" value="' + (editing6 ? editing6.costPerUnit || '' : '') + '"></div>' +
+      '<div class="form-group"><label>持有股數/份額</label><input type="number" id="f_pUnits" step="0.001" value="' + (editing6 ? editing6.units || '' : '') + '"></div></div>' +
+      '<div class="form-group"><label>幣別</label><select id="f_pCur">' + curOpts6 + '</select></div>' +
+      '<div class="form-group"><label>備註</label><input type="text" id="f_pNote" value="' + (editing6 ? editing6.note || '' : '') + '"></div>' +
+      '<input type="hidden" id="f_editId" value="' + (editId || '') + '">' +
+      '<div class="modal-actions"><button class="btn btn-s" onclick="closeModal()">取消</button><button class="btn btn-p" onclick="savePortfolio()">儲存</button></div>';
   }
   document.getElementById('modalOverlay').classList.add('show');
 }
@@ -2561,13 +2696,14 @@ function parseBillText(text) {
     desc = desc.replace(/[NT＄$]+/g, ' ').replace(/\s+/g, ' ').replace(/^[\s\-\/\.,:;]+|[\s\-\/\.,:;]+$/g, '').trim();
     if (!desc || desc.length < 2) desc = '帳單消費';
 
-    var category = guessBillCategory(desc);
+    var guessResult = guessBillCategory(desc);
 
     items.push({
       date: dateStr,
       desc: desc,
       amount: amount,
-      category: category,
+      category: guessResult.cat,
+      payTo: guessResult.payTo || '',
       checked: true
     });
   }
@@ -2612,29 +2748,40 @@ function parseBillTextLoose(text) {
     desc = desc.replace(/[NT＄$]+/g, ' ').replace(/\s+/g, ' ').replace(/^[\s\-\/\.,:;]+|[\s\-\/\.,:;]+$/g, '').trim();
     if (!desc || desc.length < 2) desc = '帳單消費';
 
-    var category = guessBillCategory(desc);
+    var guessResult2 = guessBillCategory(desc);
 
     items.push({
       date: dateStr,
       desc: desc,
       amount: amount,
-      category: category,
+      category: guessResult2.cat,
+      payTo: guessResult2.payTo || '',
       checked: true
     });
   }
   return items;
 }
 
-/** 根據消費描述猜測支出類別 */
+/** 根據消費描述猜測支出類別，回傳 { category, payTo } */
 function guessBillCategory(desc) {
   var d = DB || {};
   var cats = d.expenseCategories || DEFAULT_EXP_CATS;
   var lower = desc.toLowerCase();
 
+  // 特殊規則（含子類別和支付對象）
+  // 停管費 → 交通（子類別：停車費）
+  if (/停管費/.test(desc)) {
+    return { cat: cats.includes('交通') ? '交通 > 停車費' : '交通', payTo: '' };
+  }
+  // 優食/優步福爾摩沙 → 餐飲，支付對象 UberEat
+  if (/優食|優步福爾摩沙|uber\s*eat/i.test(desc)) {
+    return { cat: cats.includes('餐飲') ? '餐飲' : '其他支出', payTo: 'UberEat' };
+  }
+
   // 關鍵字對應表（優先順序由上到下，先匹配先返回）
   var keywords = {
     '餐飲': ['餐廳','美食','飲料','餐','食','飯','麵','咖啡','tea','coffee','food','restaurant','麥當勞','星巴克','肯德基','吃到飽','小吃','便當','pizza','burger','鍋','壽司','拉麵','早餐','午餐','晚餐','宵夜','外送','uber eats','foodpanda','摩斯','漢堡','丹丹','鼎泰豐','八方','cama','路易莎','50嵐','清心','迷客夏','茶湯會','大苑子','鮮茶道','comebuy','麻辣','燒肉','烤肉','火鍋','牛排','brunch','甜點','蛋糕','烘焙','酒','bar','pub','居酒屋','熱炒'],
-    '交通': ['加油','停車','高鐵','台鐵','捷運','uber','taxi','計程','公車','中油','台塑','parking','transport','eTag','etag','悠遊','irent','格上','和運','gogoro','wemo','共享','機車','汽車','客運','台灣大車隊','yoxi','line taxi'],
+    '交通': ['加油','停車','停管費','高鐵','台鐵','捷運','uber','taxi','計程','公車','中油','台塑','parking','transport','eTag','etag','悠遊','irent','格上','和運','gogoro','wemo','共享','機車','汽車','客運','台灣大車隊','yoxi','line taxi'],
     '購物': ['百貨','商城','mall','amazon','蝦皮','momo','pchome','yahoo','購物','超市','家樂福','costco','全聯','7-11','便利','超商','大潤發','好市多','全家','萊爾富','ok超商','ikea','特力屋','寶雅','屈臣氏','康是美','光南','誠品','無印','muji','apple','三創','nova','shopee','露天','博客來','金石堂'],
     '娛樂': ['電影','cinema','netflix','spotify','遊戲','game','ktv','電玩','串流','disney','youtube','premium','kkbox','apple music','steam','switch','ps5','xbox','任天堂','威秀','秀泰','國賓','華納','旅遊','飯店','hotel','airbnb','booking','agoda','klook','kkday','樂園','遊樂','門票','展覽','演唱會','music','健身','gym','瑜珈','運動'],
     '醫療': ['醫院','診所','藥局','藥','hospital','clinic','pharmacy','牙醫','眼科','health','醫','掛號','健保','長庚','台大','馬偕','國泰','亞東','振興','中醫','復健','手術','門診','急診'],
@@ -2650,11 +2797,11 @@ function guessBillCategory(desc) {
   for (var cat in keywords) {
     if (cats.includes(cat)) {
       for (var k = 0; k < keywords[cat].length; k++) {
-        if (lower.includes(keywords[cat][k])) return cat;
+        if (lower.includes(keywords[cat][k])) return { cat: cat, payTo: '' };
       }
     }
   }
-  return cats.includes('其他支出') ? '其他支出' : cats[0] || '其他支出';
+  return { cat: cats.includes('其他支出') ? '其他支出' : cats[0] || '其他支出', payTo: '' };
 }
 
 /** 渲染辨識結果列表 */
@@ -2741,7 +2888,7 @@ function saveBillExpenses() {
       amount: item.amount,
       currency: 'TWD',
       note: item.desc || '帳單掃描',
-      payTo: '',
+      payTo: item.payTo || '',
       usedBy: ''
     };
     d.expenses.push(newExpense);
