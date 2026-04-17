@@ -45,7 +45,7 @@ function getIcon(cat) {
 const DEFAULT_INC_CATS = ['薪資','獎金','投資收益','兼職','利息','其他收入'];
 const DEFAULT_EXP_CATS = ['餐飲','交通','購物','娛樂','醫療','教育','居住','日用品','通訊','保險','其他支出'];
 const CURRENCIES = { TWD:'新台幣', USD:'美元', JPY:'日圓', EUR:'歐元', CNY:'人民幣', KRW:'韓元', HKD:'港幣' };
-const ACCOUNT_TYPES = { bank:'銀行存款', cash:'現金', credit:'信用卡', receivable:'應收款', payable:'應付款', invest:'投資/其他' };
+const ACCOUNT_TYPES = { bank:'銀行存款', cash:'現金', credit:'信用卡' };
 const PROPERTY_TYPES = { house:'房屋', land:'土地', apartment:'公寓/大廈', commercial:'商業用房', parking:'車位', other_property:'其他不動產' };
 const VEHICLE_TYPES = { car:'汽車', motorcycle:'機車', bicycle:'自行車', boat:'船舶', other_vehicle:'其他動產' };
 const PIE_COLORS = ['#6c63ff','#00d2ff','#22c55e','#f59e0b','#ef4444','#ec4899','#8b5cf6','#14b8a6','#f97316','#64748b','#a855f7','#06b6d4'];
@@ -358,7 +358,17 @@ function _migrateLegacyReceivablePayableAccounts() {
     return a.type !== 'receivable' && a.type !== 'payable';
   });
   console.log('[FlowRich] 已自動移轉 ' + legacy.length + ' 筆舊 receivable/payable 帳戶為明細');
-  save();
+  return true;
+}
+
+/** v1.8.5 一次性資料移轉：完全移除 type='invest' 舊帳戶，改以 d.portfolio 投資組合為唯一投資資產來源。 */
+function _removeLegacyInvestAccounts() {
+  if (!DB || !DB.accounts) return false;
+  var legacy = DB.accounts.filter(function(a) { return a.type === 'invest'; });
+  if (legacy.length === 0) return false;
+  console.warn('[FlowRich v1.8.5] 完全移除', legacy.length, '筆舊 invest 帳戶：',
+    legacy.map(function(a) { return a.name + '（' + a.currency + ' ' + a.balance + '）'; }).join(', '));
+  DB.accounts = DB.accounts.filter(function(a) { return a.type !== 'invest'; });
   return true;
 }
 
@@ -368,10 +378,13 @@ function U() {
   if (!DB.categoryIcons) DB.categoryIcons = {};
   if (!DB.transfers) DB.transfers = [];
   if (!DB.receivables) DB.receivables = [];
+  if (!DB.portfolio) DB.portfolio = [];
   if (!DB.updated_at) DB.updated_at = new Date().toISOString();
   if (!_legacyMigrated) {
     _legacyMigrated = true;
-    _migrateLegacyReceivablePayableAccounts();
+    var a = _migrateLegacyReceivablePayableAccounts();
+    var b = _removeLegacyInvestAccounts();
+    if (a || b) save();
   }
   return DB;
 }
@@ -732,8 +745,8 @@ function renderDashboard() {
     .reduce(function(s, a) { return s + convert(a.balance, a.currency, cur); }, 0);
   var bankAmt = d.accounts.filter(function(a) { return a.type === 'bank'; })
     .reduce(function(s, a) { return s + convert(a.balance, a.currency, cur); }, 0);
-  var investAmt = d.accounts.filter(function(a) { return a.type === 'invest'; })
-    .reduce(function(s, a) { return s + convert(a.balance, a.currency, cur); }, 0);
+  // 投資金額來自投資組合總市值（d.portfolio），不再使用 type='invest' 帳戶
+  var investAmt = portfolioMarketValue(cur);
   var rec = (d.receivables || []).filter(function(r) { return r.type === 'receivable' && r.status === 'pending'; })
     .reduce(function(s, r) { return s + convert(r.amount, r.currency, cur); }, 0);
   var liquid = cashAmt + bankAmt + investAmt + rec;
@@ -1555,11 +1568,12 @@ function renderAssetAnalysisSection() {
   var rangeLabel = range === 'year' ? '本年度' : range === 'month' ? '本月' : '全部';
 
   // 分類計算
-  // 正資產：bank, cash, invest + 不動產現值 + 動產現值
+  // 正資產：bank + cash 帳戶 + 投資組合市值 + 不動產現值 + 動產現值
   var positiveAccts = d.accounts.filter(function(a) {
-    return a.type === 'bank' || a.type === 'cash' || a.type === 'invest';
+    return a.type === 'bank' || a.type === 'cash';
   });
   var tPositive = positiveAccts.reduce(function(s, a) { return s + convert(a.balance, a.currency, cur); }, 0);
+  tPositive += portfolioMarketValue(cur);  // 投資資產 = d.portfolio 市值
   tPositive += (d.properties || []).reduce(function(s, p) { return s + convert(p.currentValue || 0, p.currency || 'TWD', cur); }, 0);
   tPositive += (d.vehicles || []).reduce(function(s, v) { return s + convert(v.currentValue || 0, v.currency || 'TWD', cur); }, 0);
 
@@ -2026,6 +2040,36 @@ function removeStock(code) {
 // ============ 投資組合管理 ============
 var _portfolioPrices = {}; // 暫存即時股價 { code: price }
 
+/** 抓取投資組合內所有 stock 類型的即時股價，更新到 _portfolioPrices。 */
+async function fetchPortfolioPrices() {
+  var d = DB;
+  if (!d || !d.portfolio || d.portfolio.length === 0) return;
+  var stockCodes = d.portfolio.filter(function(p) { return p.type === 'stock' && p.code; }).map(function(p) { return p.code; });
+  if (stockCodes.length === 0) return;
+  try {
+    var tseQ = stockCodes.map(function(c) { return 'tse_' + c + '.tw'; }).join('|');
+    var otcQ = stockCodes.map(function(c) { return 'otc_' + c + '.tw'; }).join('|');
+    var data = await fetchTWSE(tseQ + '|' + otcQ);
+    if (data && data.msgArray) {
+      data.msgArray.forEach(function(s) {
+        var price = parseFloat(s.z) || parseFloat(s.y) || 0;
+        if (price > 0) _portfolioPrices[s.c] = price;
+      });
+    }
+  } catch (e) { /* 靜默 */ }
+}
+
+/** 計算投資組合總市值（換算到指定幣別）。若無即時股價則以成本為 fallback。 */
+function portfolioMarketValue(targetCurrency) {
+  if (!DB || !DB.portfolio) return 0;
+  return DB.portfolio.reduce(function(s, p) {
+    var cost = (p.costPerUnit || 0) * (p.units || 0);
+    var price = _portfolioPrices[p.code] || 0;
+    var mv = price > 0 ? price * (p.units || 0) : cost;
+    return s + convert(mv, p.currency || 'TWD', targetCurrency);
+  }, 0);
+}
+
 async function renderPortfolio() {
   var d = U();
   if (!d.portfolio) d.portfolio = [];
@@ -2033,23 +2077,8 @@ async function renderPortfolio() {
   var stats = document.getElementById('portfolioStats');
   if (!tb) return;
 
-  // 收集需要查詢即時股價的代號
-  var stockCodes = d.portfolio.filter(function(p) { return p.type === 'stock' && p.code; }).map(function(p) { return p.code; });
-
   // 查詢 TWSE 即時價格（經 CORS Proxy）
-  if (stockCodes.length > 0) {
-    try {
-      var tseQ = stockCodes.map(function(c) { return 'tse_' + c + '.tw'; }).join('|');
-      var otcQ = stockCodes.map(function(c) { return 'otc_' + c + '.tw'; }).join('|');
-      var data = await fetchTWSE(tseQ + '|' + otcQ);
-      if (data && data.msgArray) {
-        data.msgArray.forEach(function(s) {
-          var price = parseFloat(s.z) || parseFloat(s.y) || 0;
-          if (price > 0) _portfolioPrices[s.c] = price;
-        });
-      }
-    } catch (e) { /* 靜默 */ }
-  }
+  await fetchPortfolioPrices();
 
   var totalCost = 0, totalValue = 0;
   var typeLabels = { stock: '股票', fund: '基金', other: '其他' };
@@ -2363,10 +2392,10 @@ function openModal(type, editId) {
     var editing4 = editId ? (d.transfers || []).find(function(t) { return t.id === editId; }) : null;
     var allAccts = d.accounts;
     var fromOpts = allAccts.map(function(a) {
-      return '<option value="' + a.id + '"' + (editing4 && editing4.fromAccountId === a.id ? ' selected' : '') + '>' + a.name + ' (' + ACCOUNT_TYPES[a.type] + ')</option>';
+      return '<option value="' + a.id + '"' + (editing4 && editing4.fromAccountId === a.id ? ' selected' : '') + '>' + a.name + ' (' + (ACCOUNT_TYPES[a.type] || a.type) + ')</option>';
     }).join('');
     var toOpts = allAccts.map(function(a) {
-      return '<option value="' + a.id + '"' + (editing4 && editing4.toAccountId === a.id ? ' selected' : '') + '>' + a.name + ' (' + ACCOUNT_TYPES[a.type] + ')</option>';
+      return '<option value="' + a.id + '"' + (editing4 && editing4.toAccountId === a.id ? ' selected' : '') + '>' + a.name + ' (' + (ACCOUNT_TYPES[a.type] || a.type) + ')</option>';
     }).join('');
     var curOpts4 = Object.entries(CURRENCIES).map(function(entry) {
       return '<option value="' + entry[0] + '"' + (editing4 && editing4.currency === entry[0] ? ' selected' : '') + '>' + entry[0] + ' ' + entry[1] + '</option>';
@@ -2387,9 +2416,9 @@ function openModal(type, editId) {
     var curOpts5 = Object.entries(CURRENCIES).map(function(entry) {
       return '<option value="' + entry[0] + '"' + (editing5 && editing5.currency === entry[0] ? ' selected' : '') + '>' + entry[0] + ' ' + entry[1] + '</option>';
     }).join('');
-    // 只列可收/付的實體帳戶（排除信用卡/應收/應付帳戶型別）
+    // 只列可實際收/付款的帳戶（銀行、現金）
     var acctCandidates = d.accounts.filter(function(a) {
-      return a.type === 'bank' || a.type === 'cash' || a.type === 'invest';
+      return a.type === 'bank' || a.type === 'cash';
     });
     var acctOpts5 = '<option value="">（不指定，只記錄不動帳）</option>' +
       acctCandidates.map(function(a) {
@@ -2942,6 +2971,11 @@ function resetBillScanner() {
 document.addEventListener('DOMContentLoaded', function() {
   // 啟動股票開盤自動刷新（每分鐘 tick，實際刷新節奏 10 分鐘 + 需在投資頁 + 開盤中）
   startStockAutoRefresh();
+  // 啟動時背景載入投資組合股價，讓資產總覽的「流動資產」數字開即正確
+  setTimeout(function() {
+    if (!DB || !DB.portfolio || DB.portfolio.length === 0) return;
+    fetchPortfolioPrices().then(function() { rerenderActivePage(); });
+  }, 500);
 
   var uploadArea = document.getElementById('billUploadArea');
   if (uploadArea) {
