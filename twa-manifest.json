@@ -1,0 +1,53 @@
+{
+  "packageId": "com.richmark.app",
+  "host": "mark1888888.github.io",
+  "name": "RichMark 記帳理財",
+  "launcherName": "RichMark",
+  "display": "standalone",
+  "themeColor": "#6c63ff",
+  "navigationColor": "#0f1117",
+  "navigationColorDark": "#0f1117",
+  "navigationDividerColor": "#2e3348",
+  "navigationDividerColorDark": "#2e3348",
+  "backgroundColor": "#0f1117",
+  "enableNotifications": false,
+  "startUrl": "/RichMark/index.html",
+  "iconUrl": "https://mark1888888.github.io/RichMark/images/logo-512.png",
+  "maskableIconUrl": "https://mark1888888.github.io/RichMark/images/logo-512.png",
+  "splashScreenFadeOutDuration": 300,
+  "signingKey": {
+    "path": "./android.keystore",
+    "alias": "richmark"
+  },
+  "appVersionName": "1.9.9",
+  "appVersionCode": 1,
+  "shortcuts": [
+    {
+      "name": "新增支出",
+      "short_name": "支出",
+      "url": "/RichMark/index.html#expense",
+      "chosenIconUrl": "https://mark1888888.github.io/RichMark/images/logo-192.png"
+    },
+    {
+      "name": "新增收入",
+      "short_name": "收入",
+      "url": "/RichMark/index.html#income",
+      "chosenIconUrl": "https://mark1888888.github.io/RichMark/images/logo-192.png"
+    }
+  ],
+  "generatorApp": "bubblewrap-cli",
+  "webManifestUrl": "https://mark1888888.github.io/RichMark/manifest.json",
+  "fallbackType": "customtabs",
+  "features": {},
+  "alphaDependencies": {
+    "enabled": false
+  },
+  "enableSiteSettingsShortcut": true,
+  "isChromeOSOnly": false,
+  "isMetaQuest": false,
+  "fullScopeUrl": "https://mark1888888.github.io/RichMark/",
+  "minSdkVersion": 23,
+  "orientation": "portrait",
+  "fingerprints": [],
+  "additionalTrustedOrigins": []
+}

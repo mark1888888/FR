@@ -4,12 +4,43 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>RichMark 記帳理財</title>
+<meta name="description" content="RichMark — 個人記帳理財 × 投資追蹤 × 財務 RPG">
+<meta name="theme-color" content="#6c63ff">
+<meta name="color-scheme" content="dark light">
+<!-- PWA manifest -->
+<link rel="manifest" href="manifest.json">
+<!-- iOS 加入主畫面支援 -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="RichMark">
+<!-- 桌面相關 -->
+<meta name="application-name" content="RichMark">
+<meta name="msapplication-TileColor" content="#6c63ff">
 <link rel="stylesheet" href="css/style.css">
 <link rel="icon" type="image/x-icon" href="images/favicon.ico">
 <link rel="icon" type="image/png" sizes="32x32" href="images/favicon-32x32.png">
 <link rel="apple-touch-icon" sizes="180x180" href="images/apple-touch-icon.png">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script>
+  // 註冊 Service Worker（PWA 離線支援 + APK 打包前提）
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function() {
+      navigator.serviceWorker.register('service-worker.js').then(function(reg) {
+        // 若有更新，background fetch 完後提示用戶刷新
+        reg.addEventListener('updatefound', function() {
+          var nw = reg.installing;
+          if (!nw) return;
+          nw.addEventListener('statechange', function() {
+            if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+              console.log('[PWA] 有新版本，請重新整理套用');
+            }
+          });
+        });
+      }).catch(function(e) { console.warn('[PWA] Service Worker 註冊失敗:', e); });
+    });
+  }
+</script>
 </head>
 <body>
 

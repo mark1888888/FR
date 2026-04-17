@@ -1,0 +1,31 @@
+{
+  "name": "richmark",
+  "version": "1.9.9",
+  "description": "RichMark — 個人記帳理財 × 投資追蹤 × 財務 RPG",
+  "main": "index.html",
+  "scripts": {
+    "cap:init": "cap init RichMark com.richmark.app --web-dir=.",
+    "cap:add-android": "cap add android",
+    "cap:sync": "cap sync",
+    "cap:open-android": "cap open android",
+    "apk:debug": "cd android && ./gradlew assembleDebug",
+    "apk:release": "cd android && ./gradlew assembleRelease",
+    "twa:init": "bubblewrap init --manifest=./twa-manifest.json",
+    "twa:build": "bubblewrap build"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.1.0",
+    "@capacitor/core": "^6.1.0",
+    "@capacitor/android": "^6.1.0",
+    "@bubblewrap/cli": "^1.21.0"
+  },
+  "keywords": [
+    "richmark",
+    "pwa",
+    "finance",
+    "budget",
+    "taiwan"
+  ],
+  "author": "RichMark",
+  "license": "MIT"
+}

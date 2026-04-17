@@ -1,5 +1,39 @@
 # RichMark 更新記錄（前身為 FlowRich）
 
+## v1.10.0 — 2026-04-17 · PWA + APK 打包支援
+
+### 升級為合格 PWA
+- 新增 `manifest.json`：app 名稱、主題色、主畫面圖示、三個應用捷徑（新增支出/收入/總覽）
+- 新增 `service-worker.js`：
+  - 靜態資源 Cache-First（HTML/CSS/JS/圖片）
+  - 第三方 API（Supabase、TWSE、CoinGecko、metals.dev 等）Network-Only
+  - 導覽請求 Network-First，斷網自動回退首頁
+  - 版本化快取（`richmark-v1.9.9`），改版本即觸發更新
+- `index.html` 掛入 PWA 相關 meta：
+  - `theme-color`、`apple-mobile-web-app-capable`、`apple-mobile-web-app-title`
+  - `application-name`、`msapplication-TileColor`
+  - 自動註冊 service worker（監聽 updatefound）
+
+### APK 建置支援（3 條路徑）
+提供完整建置配置 + 教學：
+- `manifest.json` — PWA 宣告
+- `service-worker.js` — 離線支援
+- `twa-manifest.json` — Bubblewrap TWA 配置（Chrome 官方推薦）
+- `capacitor.config.json` — Capacitor 配置（需要原生功能時用）
+- `package.json` — 建置腳本 + devDependencies
+- **`BUILD_APK.md`** — 三種打包方式詳細教學：
+  1. 🟢 **PWABuilder**（零代碼、線上生成 APK，3 分鐘）
+  2. 🟡 **Bubblewrap TWA**（Chrome 官方、小 APK ~2MB）
+  3. 🟠 **Capacitor**（需 Android Studio、支援原生功能）
+- 含 Digital Asset Links、keystore 簽章、Play 商店上架步驟
+
+### 相容性注意
+- PWA 功能只在 HTTPS 或 localhost 生效（本機 `file://` 無法註冊 SW）
+- Service Worker 版本升級時，舊快取會自動清除
+- iOS 加到主畫面後以 standalone 模式顯示，沒有 URL bar
+
+---
+
 ## v1.9.9 — 2026-04-17 · 個人資料（暱稱 + 頭像）
 
 ### 新功能
