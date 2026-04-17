@@ -575,6 +575,57 @@ function switchPage(page) {
 }
 
 // ============ 總覽 (Dashboard) ============
+
+/** 依閾值表回傳顏色等級與評語。
+ *  higherIsBetter=false: 值越低越好（如負債比率）。true: 值越高越好（如儲蓄率）。
+ *  thresholds: [good, warn] — 依 higherIsBetter 方向分區。
+ */
+function _healthLevel(val, thresholds, higherIsBetter) {
+  if (!isFinite(val)) return { cls: 'c-green', tip: '充足', icon: '✓' };
+  var good = thresholds[0], warn = thresholds[1];
+  if (higherIsBetter) {
+    if (val >= good) return { cls: 'c-green', tip: '健康', icon: '✓' };
+    if (val >= warn) return { cls: 'c-orange', tip: '尚可', icon: '!' };
+    return { cls: 'c-red', tip: '警訊', icon: '✕' };
+  } else {
+    if (val <= good) return { cls: 'c-green', tip: '健康', icon: '✓' };
+    if (val <= warn) return { cls: 'c-orange', tip: '注意', icon: '!' };
+    return { cls: 'c-red', tip: '警訊', icon: '✕' };
+  }
+}
+
+/** 產生財務健康指標卡片 HTML。依現有資料可算 3 項：負債比率、儲蓄率、緊急預備金月數。 */
+function renderHealthCards(v) {
+  // 負債比率 = 總負債 / 總資產（越低越好，建議 < 40%）
+  var debtRatio = v.totalAsset > 0 ? (v.totalLiab / v.totalAsset) * 100 : 0;
+  var dLv = _healthLevel(debtRatio, [40, 60], false);
+  var debtRatioStr = v.totalAsset > 0 ? debtRatio.toFixed(1) + '%' : '--';
+
+  // 儲蓄率 = 儲蓄 / 收入（越高越好，建議 ≥ 20%，至少 10%）
+  var savingRate = v.income > 0 ? (v.saving / v.income) * 100 : null;
+  var sLv = savingRate === null
+    ? { cls: 'c-muted', tip: '本月無收入', icon: '—' }
+    : _healthLevel(savingRate, [20, 10], true);
+  var savingRateStr = savingRate === null ? '--' : savingRate.toFixed(1) + '%';
+
+  // 緊急預備金月數 = 流動資產 / 本月支出（建議 3-6 個月）
+  var emMonths = v.monthExp > 0 ? v.liquid / v.monthExp : (v.liquid > 0 ? Infinity : 0);
+  var eLv = _healthLevel(emMonths, [6, 3], true);
+  var emStr = v.monthExp > 0 ? emMonths.toFixed(1) + ' 個月' : (v.liquid > 0 ? '∞ 本月無支出' : '0 個月');
+
+  return (
+    '<div class="stat-card"><div class="label">負債比率</div>' +
+      '<div class="value ' + dLv.cls + '">' + debtRatioStr + ' <span style="font-size:14px">' + dLv.icon + '</span></div>' +
+      '<div class="sub">總負債 ÷ 總資產｜標準 &lt; 40%｜' + dLv.tip + '</div></div>' +
+    '<div class="stat-card"><div class="label">儲蓄率</div>' +
+      '<div class="value ' + sLv.cls + '">' + savingRateStr + ' <span style="font-size:14px">' + sLv.icon + '</span></div>' +
+      '<div class="sub">本月儲蓄 ÷ 本月收入｜標準 ≥ 20%｜' + sLv.tip + '</div></div>' +
+    '<div class="stat-card"><div class="label">緊急預備金</div>' +
+      '<div class="value ' + eLv.cls + '">' + emStr + ' <span style="font-size:14px">' + eLv.icon + '</span></div>' +
+      '<div class="sub">流動資產 ÷ 本月支出｜標準 3–6 個月｜' + eLv.tip + '</div></div>'
+  );
+}
+
 function renderDashboard() {
   var d = U();
   var month = document.getElementById('dashMonth').value;
@@ -585,36 +636,51 @@ function renderDashboard() {
   var tE = sumConverted(exp, 'amount', cur);
   var net = tI - tE;
 
-  // 資產計算：正資產（bank+cash+invest + 不動產現值 + 動產現值）
-  var posAsset = d.accounts.filter(function(a) { return a.type === 'bank' || a.type === 'cash' || a.type === 'invest'; })
+  // ======== 資產負債表：按流動性分類 ========
+  // 流動資產 = 現金 + 銀行存款 + 應收款
+  var cashAmt = d.accounts.filter(function(a) { return a.type === 'cash'; })
     .reduce(function(s, a) { return s + convert(a.balance, a.currency, cur); }, 0);
-  // 加上不動產和動產現值
-  posAsset += (d.properties || []).reduce(function(s, p) { return s + convert(p.currentValue || 0, p.currency || 'TWD', cur); }, 0);
-  posAsset += (d.vehicles || []).reduce(function(s, v) { return s + convert(v.currentValue || 0, v.currency || 'TWD', cur); }, 0);
-  // 未收款/應付款：從明細記錄加總
+  var bankAmt = d.accounts.filter(function(a) { return a.type === 'bank'; })
+    .reduce(function(s, a) { return s + convert(a.balance, a.currency, cur); }, 0);
   var rec = (d.receivables || []).filter(function(r) { return r.type === 'receivable' && r.status === 'pending'; })
     .reduce(function(s, r) { return s + convert(r.amount, r.currency, cur); }, 0);
-  var pay = (d.receivables || []).filter(function(r) { return r.type === 'payable' && r.status === 'pending'; })
-    .reduce(function(s, r) { return s + convert(r.amount, r.currency, cur); }, 0);
+  var liquid = cashAmt + bankAmt + rec;
+
+  // 非流動資產 = 投資 + 不動產現值 + 動產現值
+  var investAmt = d.accounts.filter(function(a) { return a.type === 'invest'; })
+    .reduce(function(s, a) { return s + convert(a.balance, a.currency, cur); }, 0);
+  var propertyAmt = (d.properties || []).reduce(function(s, p) { return s + convert(p.currentValue || 0, p.currency || 'TWD', cur); }, 0);
+  var vehicleAmt = (d.vehicles || []).reduce(function(s, v) { return s + convert(v.currentValue || 0, v.currency || 'TWD', cur); }, 0);
+  var nonLiquid = investAmt + propertyAmt + vehicleAmt;
+
+  // 負債 = 信用卡 + 應付款
   var debt = d.accounts.filter(function(a) { return a.type === 'credit'; })
     .reduce(function(s, a) { return s + convert(Math.abs(a.balance), a.currency, cur); }, 0);
-  // 總負債 = 應付款 + 信用卡負債
-  var totalLiab = pay + debt;
-  // 淨資產 = 正資產 + 未收款 − 總負債（標準 Net Worth 定義）
-  var netA = posAsset + rec - totalLiab;
+  var pay = (d.receivables || []).filter(function(r) { return r.type === 'payable' && r.status === 'pending'; })
+    .reduce(function(s, r) { return s + convert(r.amount, r.currency, cur); }, 0);
+  var totalLiab = debt + pay;
 
-  // 上區：資產狀況（存量）— 4 張卡，金額不重疊
+  var totalAsset = liquid + nonLiquid;
+  var netA = totalAsset - totalLiab;  // 淨資產 = 總資產 − 總負債
+
+  // ======== 第 1 區：資產負債表（存量）— 4 張卡 ========
   document.getElementById('dashStatsAssets').innerHTML =
-    '<div class="stat-card"><div class="label">淨資產</div><div class="value c-primary">' + fmt(netA, cur) + '</div><div class="sub">正資產 + 未收款 − 總負債</div></div>' +
-    '<div class="stat-card"><div class="label">正資產</div><div class="value c-blue">' + fmt(posAsset, cur) + '</div><div class="sub">銀行+現金+投資+不動產+動產</div></div>' +
-    '<div class="stat-card"><div class="label">未收款</div><div class="value c-orange">' + fmt(rec, cur) + '</div><div class="sub">應收帳款</div></div>' +
-    '<div class="stat-card"><div class="label">總負債</div><div class="value c-red">' + fmt(totalLiab, cur) + '</div><div class="sub">應付款 ' + fmt(pay, cur) + ' + 信用卡 ' + fmt(debt, cur) + '</div></div>';
+    '<div class="stat-card"><div class="label">淨資產</div><div class="value c-primary">' + fmt(netA, cur) + '</div><div class="sub">總資產 − 總負債</div></div>' +
+    '<div class="stat-card"><div class="label">流動資產</div><div class="value c-blue">' + fmt(liquid, cur) + '</div><div class="sub">現金 ' + fmt(cashAmt, cur) + ' + 銀行 ' + fmt(bankAmt, cur) + ' + 應收 ' + fmt(rec, cur) + '</div></div>' +
+    '<div class="stat-card"><div class="label">非流動資產</div><div class="value c-blue">' + fmt(nonLiquid, cur) + '</div><div class="sub">投資 ' + fmt(investAmt, cur) + ' + 不動產 ' + fmt(propertyAmt, cur) + ' + 動產 ' + fmt(vehicleAmt, cur) + '</div></div>' +
+    '<div class="stat-card"><div class="label">總負債</div><div class="value c-red">' + fmt(totalLiab, cur) + '</div><div class="sub">信用卡 ' + fmt(debt, cur) + ' + 應付款 ' + fmt(pay, cur) + '</div></div>';
 
-  // 下區：本月收支（流量）— 3 張卡
+  // ======== 第 2 區：收支儲蓄表（流量）— 3 張卡 ========
   document.getElementById('dashStatsFlow').innerHTML =
     '<div class="stat-card"><div class="label">收入</div><div class="value c-green">' + fmt(tI, cur) + '</div><div class="sub">' + inc.length + ' 筆</div></div>' +
     '<div class="stat-card"><div class="label">支出</div><div class="value c-red">' + fmt(tE, cur) + '</div><div class="sub">' + exp.length + ' 筆</div></div>' +
-    '<div class="stat-card"><div class="label">淨收支</div><div class="value ' + (net >= 0 ? 'c-green' : 'c-red') + '">' + (net >= 0 ? '+' : '') + fmt(net, cur) + '</div><div class="sub">收入 − 支出</div></div>';
+    '<div class="stat-card"><div class="label">儲蓄（淨收支）</div><div class="value ' + (net >= 0 ? 'c-green' : 'c-red') + '">' + (net >= 0 ? '+' : '') + fmt(net, cur) + '</div><div class="sub">收入 − 支出</div></div>';
+
+  // ======== 第 3 區：財務健康指標 ========
+  document.getElementById('dashStatsHealth').innerHTML = renderHealthCards({
+    totalAsset: totalAsset, totalLiab: totalLiab,
+    income: tI, saving: net, liquid: liquid, monthExp: tE
+  });
 
   // 最近交易
   var all = [
@@ -897,7 +963,9 @@ function renderAssets() {
       recvSection.style.display = 'block';
       var isRecv = currentAssetTab === 'receivable';
       document.getElementById('recvTableTitle').textContent = isRecv ? '應收款明細' : '應付款明細';
-      recvSection.querySelector('button').onclick = function() { openModal('receivable'); };
+      var addBtnEl = recvSection.querySelector('button');
+      addBtnEl.textContent = isRecv ? '+ 新增應收款' : '+ 新增應付款';
+      addBtnEl.onclick = function() { openModal('receivable'); };
       renderReceivables(isRecv);
     } else {
       recvSection.style.display = 'none';
@@ -1072,7 +1140,6 @@ function renderReceivables(isRecv) {
     } else {
       statusHtml = '<span class="tag tag-blue">未到期</span>';
     }
-    var ac = d.accounts.find(function(a) { return a.id === r.accountId; });
     return '<tr' + (overdueDays > 0 ? ' style="background:rgba(239,68,68,.05)"' : '') + '>' +
       '<td>' + (r.date || '-') + '</td>' +
       '<td>' + (r.dueDate || '-') + '</td>' +
@@ -1081,13 +1148,12 @@ function renderReceivables(isRecv) {
       '<td>' + (r.note || '-') + '</td>' +
       '<td style="font-weight:600" class="' + (isRecv ? 'c-orange' : 'c-red') + '">' + fmt(r.amount, r.currency) + '</td>' +
       '<td>' + (r.currency || 'TWD') + '</td>' +
-      '<td>' + (ac ? ac.name : '-') + '</td>' +
       '<td>' +
         (r.status !== 'paid' ? '<span class="edit-btn" onclick="markReceivablePaid(\'' + r.id + '\')" title="' + (isRecv ? '標記已收款' : '標記已付款') + '">✅</span>' : '') +
         '<span class="edit-btn" onclick="editReceivable(\'' + r.id + '\')">✏️</span>' +
         '<span class="del-btn" onclick="deleteReceivable(\'' + r.id + '\')">✕</span>' +
       '</td></tr>';
-  }).join('') : '<tr><td colspan="9" style="text-align:center;color:var(--text3);padding:40px">尚無' + (isRecv ? '應收款' : '應付款') + '記錄</td></tr>';
+  }).join('') : '<tr><td colspan="8" style="text-align:center;color:var(--text3);padding:40px">尚無' + (isRecv ? '應收款' : '應付款') + '記錄</td></tr>';
 }
 
 function markReceivablePaid(id) {
@@ -1095,19 +1161,10 @@ function markReceivablePaid(id) {
   var r = (d.receivables || []).find(function(rv) { return rv.id === id; });
   if (!r) return;
   var isRecv = r.type === 'receivable';
-  showConfirmModal(isRecv ? '確定標記為已收款？金額將存入對應帳戶。' : '確定標記為已付款？金額將從對應帳戶扣除。', function() {
+  showConfirmModal(isRecv ? '確定標記為已收款？' : '確定標記為已付款？', function() {
     r.status = 'paid';
-    // 更新對應帳戶餘額
-    if (r.accountId) {
-      var acct = d.accounts.find(function(a) { return a.id === r.accountId; });
-      if (acct) {
-        var amt = convert(r.amount, r.currency, acct.currency);
-        if (isRecv) acct.balance += amt;
-        else acct.balance -= amt;
-      }
-    }
     save(); renderAssets();
-    showToast(isRecv ? '已收款，金額已存入帳戶' : '已付款，金額已從帳戶扣除');
+    showToast(isRecv ? '已標記已收款' : '已標記已付款');
   });
 }
 
@@ -1134,7 +1191,6 @@ function saveReceivable() {
     target: document.getElementById('f_target').value.trim(),
     amount: parseFloat(document.getElementById('f_amt').value) || 0,
     currency: document.getElementById('f_cur').value,
-    accountId: document.getElementById('f_acct').value,
     note: document.getElementById('f_note').value.trim(),
     status: 'pending'
   };
@@ -1383,8 +1439,7 @@ function renderAssetAnalysisSection() {
 
     document.getElementById('aasReceivableTable').innerHTML = pendingReceivables.length ?
       pendingReceivables.map(function(r) {
-        var acct = d.accounts.find(function(a) { return a.id === r.accountId; });
-        return '<tr><td style="font-weight:600">' + (acct ? acct.name : '-') + '</td><td>' +
+        return '<tr><td>' + (r.dueDate || r.date || '-') + '</td><td style="font-weight:600">' +
           (r.target || '-') + '</td><td>' + r.currency + '</td>' +
           '<td class="c-orange" style="font-weight:600">' + fmt(r.amount, r.currency) +
           '</td><td style="color:var(--text3)">' + (r.note || '-') + '</td></tr>';
@@ -1400,8 +1455,7 @@ function renderAssetAnalysisSection() {
 
     document.getElementById('aasPayableTable').innerHTML = pendingPayables.length ?
       pendingPayables.map(function(r) {
-        var acct = d.accounts.find(function(a) { return a.id === r.accountId; });
-        return '<tr><td style="font-weight:600">' + (acct ? acct.name : '-') + '</td><td>' +
+        return '<tr><td>' + (r.dueDate || r.date || '-') + '</td><td style="font-weight:600">' +
           (r.target || '-') + '</td><td>' + r.currency + '</td>' +
           '<td class="c-red" style="font-weight:600">' + fmt(r.amount, r.currency) +
           '</td><td style="color:var(--text3)">' + (r.note || '-') + '</td></tr>';
@@ -2029,16 +2083,12 @@ function openModal(type, editId) {
     var curOpts5 = Object.entries(CURRENCIES).map(function(entry) {
       return '<option value="' + entry[0] + '"' + (editing5 && editing5.currency === entry[0] ? ' selected' : '') + '>' + entry[0] + ' ' + entry[1] + '</option>';
     }).join('');
-    var acctOpts5 = d.accounts.map(function(a) {
-      return '<option value="' + a.id + '"' + (editing5 && editing5.accountId === a.id ? ' selected' : '') + '>' + a.name + '</option>';
-    }).join('');
     m.innerHTML = '<h3>' + (editing5 ? '編輯' : '新增') + label + '</h3>' +
       '<div class="form-row"><div class="form-group"><label>建立日期</label><input type="date" id="f_date" value="' + (editing5 ? editing5.date : new Date().toISOString().slice(0, 10)) + '"></div>' +
       '<div class="form-group"><label>應付日期（到期日）</label><input type="date" id="f_dueDate" value="' + (editing5 ? editing5.dueDate || '' : '') + '"></div></div>' +
       '<div class="form-group"><label>' + (isRecv ? '付款對象/機構' : '應付對象/機構') + '</label><input type="text" id="f_target" placeholder="例：張先生 / 台電公司" value="' + (editing5 ? editing5.target || '' : '') + '"></div>' +
       '<div class="form-row"><div class="form-group"><label>金額</label><input type="number" id="f_amt" step="0.01" value="' + (editing5 ? editing5.amount : '') + '"></div>' +
       '<div class="form-group"><label>幣別</label><select id="f_cur">' + curOpts5 + '</select></div></div>' +
-      '<div class="form-group"><label>' + (isRecv ? '收款帳戶' : '付款帳戶') + '</label><select id="f_acct">' + acctOpts5 + '</select></div>' +
       '<div class="form-group"><label>備註</label><input type="text" id="f_note" value="' + (editing5 ? editing5.note || '' : '') + '"></div>' +
       '<input type="hidden" id="f_editId" value="' + (editId || '') + '">' +
       '<div class="modal-actions"><button class="btn btn-s" onclick="closeModal()">取消</button><button class="btn btn-p" onclick="saveReceivable()">儲存</button></div>';
