@@ -173,6 +173,7 @@ button{cursor:pointer;border:none;background:none;color:inherit}
 .c-orange{color:var(--orange)}
 .c-pink{color:var(--pink)}
 .c-primary{color:var(--primary-light)}
+.c-muted{color:var(--text3)}
 
 /* ============ 表格 ============ */
 .table-wrap{
