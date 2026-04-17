@@ -239,12 +239,12 @@ tr:hover td{background:rgba(108,99,255,.03)}
   background:var(--card);border:1px solid var(--border);
   border-radius:16px;padding:20px;margin-bottom:24px;transition:background .3s;
 }
-.chart-container h3{font-size:16px;font-weight:600;margin-bottom:16px}
+.chart-container h3{font-size:16px;font-weight:600;margin-bottom:16px;text-align:center}
 .chart-bar-group{margin-bottom:12px}
 .chart-bar-label{display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px}
 .chart-bar{height:24px;background:var(--bar-bg);border-radius:6px;overflow:hidden}
 .chart-bar-fill{height:100%;border-radius:6px;transition:width .6s ease}
-.pie-chart-wrap{display:flex;align-items:center;gap:32px;flex-wrap:wrap}
+.pie-chart-wrap{display:flex;align-items:center;justify-content:center;gap:32px;flex-wrap:wrap}
 .pie-legend{display:flex;flex-direction:column;gap:8px}
 .pie-legend-item{display:flex;align-items:center;gap:8px;font-size:13px}
 .pie-legend-dot{width:12px;height:12px;border-radius:3px;flex-shrink:0}
@@ -524,7 +524,7 @@ th.sortable:hover{background:rgba(108,99,255,.1)}
 
   /* 圖表：堆疊而非並排 */
   .dual-grid{grid-template-columns:1fr!important;gap:16px}
-  .pie-chart-wrap{flex-direction:column;align-items:flex-start;gap:16px}
+  .pie-chart-wrap{flex-direction:column;align-items:center;gap:16px}
 
   /* 圖表容器 */
   .chart-container{padding:16px;border-radius:12px;margin-bottom:16px}
