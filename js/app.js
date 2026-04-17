@@ -1,5 +1,5 @@
 // ============================================================
-// FlowRich 記帳理財 - app.js
+// RichMark 記帳理財 - app.js（前身為 FlowRich，內部 key 保留 flowrich_* 以相容舊資料）
 // 包含所有業務邏輯、Supabase 雲端同步、圖表繪製
 // ============================================================
 
@@ -367,7 +367,7 @@ function _migrateLegacyReceivablePayableAccounts() {
   DB.accounts = DB.accounts.filter(function(a) {
     return a.type !== 'receivable' && a.type !== 'payable';
   });
-  console.log('[FlowRich] 已自動移轉 ' + legacy.length + ' 筆舊 receivable/payable 帳戶為明細');
+  console.log('[RichMark] 已自動移轉 ' + legacy.length + ' 筆舊 receivable/payable 帳戶為明細');
   return true;
 }
 
@@ -376,7 +376,7 @@ function _removeLegacyInvestAccounts() {
   if (!DB || !DB.accounts) return false;
   var legacy = DB.accounts.filter(function(a) { return a.type === 'invest'; });
   if (legacy.length === 0) return false;
-  console.warn('[FlowRich v1.8.5] 完全移除', legacy.length, '筆舊 invest 帳戶：',
+  console.warn('[RichMark v1.8.5] 完全移除', legacy.length, '筆舊 invest 帳戶：',
     legacy.map(function(a) { return a.name + '（' + a.currency + ' ' + a.balance + '）'; }).join(', '));
   DB.accounts = DB.accounts.filter(function(a) { return a.type !== 'invest'; });
   return true;
@@ -654,6 +654,20 @@ function renderRateTable() {
   }).join('');
   var info = document.getElementById('rateInfo');
   if (info) info.textContent = '匯率來源: exchangerate-api.com｜' + new Date().toLocaleString('zh-TW');
+}
+
+// ============ 手機「更多」選單 ============
+function toggleMoreMenu(show) {
+  var el = document.getElementById('moreMenuOverlay');
+  if (!el) return;
+  if (show === undefined) show = !el.classList.contains('show');
+  el.classList.toggle('show', show);
+  document.body.style.overflow = show ? 'hidden' : '';
+}
+
+function switchFromMore(page) {
+  toggleMoreMenu(false);
+  switchPage(page);
 }
 
 // ============ 頁面切換（含底部導航同步） ============
@@ -3958,7 +3972,7 @@ function exportData() {
   var b = new Blob([JSON.stringify(DB, null, 2)], { type: 'application/json' });
   var a = document.createElement('a');
   a.href = URL.createObjectURL(b);
-  a.download = 'FlowRich_' + currentUser + '_' + new Date().toISOString().slice(0, 10) + '.json';
+  a.download = 'RichMark_' + currentUser + '_' + new Date().toISOString().slice(0, 10) + '.json';
   a.click();
 }
 

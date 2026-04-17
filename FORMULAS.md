@@ -1,6 +1,8 @@
-# FlowRich 公式與數據定義
+# RichMark 公式與數據定義
 
-本文件整合 FlowRich 各頁面所用到的所有金額、統計、公式與欄位來源，作為前後端計算的唯一真實來源 (single source of truth)。每次公式調整都應同步更新此文件。
+本文件整合 RichMark 各頁面所用到的所有金額、統計、公式與欄位來源，作為前後端計算的唯一真實來源 (single source of truth)。每次公式調整都應同步更新此文件。
+
+> 注：本產品前身為「FlowRich」，v1.9.2 更名為 RichMark。為相容既有資料，程式內部 localStorage key 仍保留 `flowrich_*` 前綴。
 
 版本：v1.9.0 ｜更新：2026-04-17
 

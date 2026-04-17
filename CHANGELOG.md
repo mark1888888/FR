@@ -1,4 +1,67 @@
-# FlowRich 更新記錄
+# RichMark 更新記錄（前身為 FlowRich）
+
+## v1.9.2 — 2026-04-17 · 品牌更名 RichMark
+
+### 改變
+- **產品更名為 RichMark**（前身為 FlowRich）
+  - `<title>` 改為「RichMark 記帳理財」
+  - 登入頁、註冊頁標題統一為 RichMark
+  - 桌面側邊欄 logo 文字改為 RichMark
+  - 管理後台標題改為 RichMark
+  - 資料匯出檔名改為 `RichMark_{user}_{date}.json`
+  - 內部 console log 前綴 `[FlowRich]` → `[RichMark]`
+
+### 新 Logo 套用
+- 登入頁主 logo 使用 `images/logo-192.png`（可愛微笑頭像）
+  - 尺寸 96×96、圓角 24px、加微妙陰影與邊框強化視覺
+  - 淺色模式自動加白底提升可見性
+- 側邊欄 logo icon 從 favicon-32 改用 logo-192.png
+  - 尺寸 32×32、圓角 8px、半透明背景 chip 風格
+
+### 資料相容性
+- 保留 `localStorage` key `flowrich_user_*` 與 `flowrich_theme` 不變，以免舊使用者資料遺失
+- Supabase schema 不變
+- FORMULAS.md 加入更名說明
+
+---
+
+## v1.9.1 — 2026-04-17 · UI/UX 全面優化
+
+### 手機版導航重構
+- **底部導航改為「4 主要 + 更多」**：原本 6 個固定選項無法容納 11 個頁面，現在變為：總覽 / 收入 / 支出 / 資產 / 更多
+- **「更多」彈出 Bottom Sheet**：以 iOS 風格的底部抽屜顯示所有次要頁面（收支分析、帳戶轉帳、投資情報、財務規劃、財務成長、匯率換算、系統設定、切換主題）
+- Bottom sheet 附拖曳條、滑入動畫、點擊外部關閉
+- 底部導航 icon 放大到 22×22、觸控區 52px 高、各項 `flex:1` 等分
+- 底部導航支援 iOS 安全區 (`env(safe-area-inset-bottom)`)
+
+### 輸入元件體驗強化（全域）
+- **手機輸入框 16px 字型**：防止 iOS Safari 聚焦時自動縮放頁面
+- **自訂 select 下拉箭頭**：所有 select 統一 appearance:none + 背景 SVG 箭頭，跨瀏覽器一致
+- **focus 狀態強化**：聚焦時有紫色外框 + 3px 光暈 (`box-shadow`)
+- **placeholder 色彩統一**：淡灰 + opacity 0.7
+- **number input 移除上下箭頭**：視覺更乾淨
+- **textarea 垂直 resize**：min-height:80px，不會意外被拉寬破版
+- **date/time 圖示深色模式適配**：`-webkit-calendar-picker-indicator filter:invert(.6)`
+- **disabled 狀態**：opacity:.5 + not-allowed cursor
+
+### 版面寬度修正
+- 匯率換算卡從 `max-width:500px` 改為 `640px` 且置中，不再偏左顯示
+- 超寬螢幕（>1800px）頁面自動居中限寬 1600px，保持可讀性
+- `.main` padding 統一為 `28px 36px` 桌面版
+- stat-grid 改用 `auto-fit` 確保卡片填滿整行
+
+### 觸控目標與可及性
+- 手機 Modal form-group 輸入框高度 48px、字型 16px、padding 14px
+- Tab 按鈕觸控區 40px 高、padding 10×14
+- 篩選列 select/input 觸控區 44px
+- 按鈕最小 44×44（符合 Apple HIG / Material Design 建議）
+
+### 極小螢幕 (≤400px)
+- 更多選單改 3 欄（原 4 欄會太擠）
+- Modal max-height 降為 88vh 留出軟鍵盤空間
+- 各元件字型與 padding 全面微調
+
+---
 
 ## v1.9.0 — 2026-04-17 · 財務成長 RPG
 
