@@ -1,5 +1,16 @@
 # FlowRich 更新記錄
 
+## v1.7.3 — 2026-04-17
+
+### 修正
+- **股價 API 改用 CORS Proxy 代理**：
+  - 原本直接呼叫 `mis.twse.com.tw` 會被瀏覽器 CORS 擋下，導致股價常常抓不到
+  - 新增 `fetchTWSE()` 輔助函式，依序嘗試 `corsproxy.io`、`allorigins.win`、`codetabs.com` 三個公開代理
+  - 任一代理成功即回傳，保留 TWSE 原始即時報價來源
+  - 影響範圍：追蹤股票清單（`loadStocks`）、投資組合即時市值（`renderPortfolio`）
+
+---
+
 ## v1.7.2 — 2026-04-17
 
 ### 修正
