@@ -294,6 +294,7 @@
         <button class="tab-btn" onclick="switchAssetTab('payable',this)">應付款</button>
         <button class="tab-btn" onclick="switchAssetTab('property',this)">不動產</button>
         <button class="tab-btn" onclick="switchAssetTab('vehicle',this)">動產</button>
+        <button class="tab-btn" onclick="switchAssetTab('portfolio',this)">投資組合</button>
       </div>
       <div class="btn-group" style="margin-bottom:20px">
         <button class="btn btn-p" id="assetAddBtn" onclick="openAssetModal()">+ 新增帳戶</button>
@@ -319,6 +320,24 @@
             <table>
               <thead><tr><th>建立日期</th><th>應付日期</th><th>狀態</th><th>對象/機構</th><th>說明</th><th>金額</th><th>幣別</th><th>連動帳戶</th><th>操作</th></tr></thead>
               <tbody id="recvTable"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <!-- 投資組合（從投資情報移過來） -->
+      <div id="portfolioSection" style="display:none;margin-top:24px">
+        <div class="table-wrap">
+          <div class="table-header" style="display:flex;justify-content:space-between;align-items:center">
+            <h3>我的投資組合</h3>
+            <button class="btn btn-p btn-sm" onclick="openModal('portfolio')">+ 新增持倉</button>
+          </div>
+          <div style="padding:16px 20px 0">
+            <div class="stat-grid" id="portfolioStats"></div>
+          </div>
+          <div class="table-scroll-wrap">
+            <table>
+              <thead><tr><th>類型</th><th>代號</th><th>名稱</th><th>持有數</th><th>成本價</th><th>總成本</th><th>現價</th><th>市值</th><th>損益</th><th>操作</th></tr></thead>
+              <tbody id="portfolioTable"></tbody>
             </table>
           </div>
         </div>
@@ -428,19 +447,6 @@
       <div class="chart-container">
         <h3>貴金屬 & 加密貨幣即時價格</h3>
         <div id="metalsContainer"><p style="color:var(--text3)">載入中...</p></div>
-      </div>
-      <div class="chart-container">
-        <h3>我的投資組合</h3>
-        <div class="filter-bar" style="margin-bottom:12px">
-          <button class="btn btn-p btn-sm" onclick="openModal('portfolio')">+ 新增持倉</button>
-        </div>
-        <div class="stat-grid" id="portfolioStats"></div>
-        <div class="table-scroll-wrap">
-          <table>
-            <thead><tr><th>類型</th><th>代號</th><th>名稱</th><th>持有數</th><th>成本價</th><th>總成本</th><th>現價</th><th>市值</th><th>損益</th><th></th></tr></thead>
-            <tbody id="portfolioTable"></tbody>
-          </table>
-        </div>
       </div>
       <div class="chart-container">
         <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px">

@@ -94,28 +94,36 @@ html.light .login-logo{background:#fff}
 
 /* ============ App 主結構 ============ */
 .app{display:none;height:100vh;overflow:hidden}
+html,body{overflow-x:hidden;max-width:100vw}
 
 /* ============ 側邊欄（桌面） ============ */
 .sidebar{
   width:var(--sidebar-width);background:var(--surface);
-  border-right:1px solid var(--border);padding:20px 0;
+  border-right:1px solid var(--border);padding:16px 0;
   display:flex;flex-direction:column;
   position:fixed;top:0;left:0;bottom:0;z-index:100;
   box-shadow:var(--shadow-md);
+  overflow-y:auto;overflow-x:hidden;
+  scrollbar-width:thin;scrollbar-color:var(--border) transparent;
   transition:background var(--trans-slow),width var(--trans-base);
 }
+/* 側邊欄專用窄捲動條 */
+.sidebar::-webkit-scrollbar{width:4px}
+.sidebar::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+.sidebar:hover::-webkit-scrollbar-thumb{background:var(--text3)}
 .sidebar .logo{
-  padding:0 24px;font-size:22px;font-weight:700;margin-bottom:32px;
+  padding:0 20px;font-size:20px;font-weight:700;margin-bottom:20px;
   background:linear-gradient(135deg,var(--primary),var(--accent));
   -webkit-background-clip:text;-webkit-text-fill-color:transparent;
   display:flex;align-items:center;gap:8px;
+  flex-shrink:0;
 }
-.logo-icon{width:32px;height:32px;border-radius:8px;object-fit:contain;background:rgba(255,255,255,.06);padding:3px}
+.logo-icon{width:28px;height:28px;border-radius:8px;object-fit:contain;background:rgba(255,255,255,.06);padding:3px;-webkit-text-fill-color:initial;flex-shrink:0}
 html.light .logo-icon{background:rgba(108,99,255,.08)}
 .nav-item{
   display:flex;align-items:center;gap:12px;
-  padding:12px 24px;color:var(--text2);font-size:14px;
-  cursor:pointer;min-height:44px;position:relative;
+  padding:10px 20px;color:var(--text2);font-size:14px;
+  cursor:pointer;min-height:42px;position:relative;flex-shrink:0;
   transition:background var(--trans-base),color var(--trans-base),padding var(--trans-base);
 }
 .nav-item::before{
@@ -124,7 +132,7 @@ html.light .logo-icon{background:rgba(108,99,255,.08)}
   transform:scaleY(0);transform-origin:center;
   transition:transform var(--trans-base);
 }
-.nav-item:hover{background:rgba(108,99,255,.08);color:var(--text);padding-left:28px}
+.nav-item:hover{background:rgba(108,99,255,.08);color:var(--text);padding-left:24px}
 .nav-item.active{
   background:linear-gradient(90deg,rgba(108,99,255,.18),rgba(108,99,255,.04));
   color:var(--primary-light);
@@ -132,10 +140,11 @@ html.light .logo-icon{background:rgba(108,99,255,.08)}
 .nav-item.active::before{transform:scaleY(1)}
 .nav-item svg{width:20px;height:20px;flex-shrink:0;transition:transform var(--trans-base)}
 .nav-item:hover svg{transform:scale(1.1)}
-.nav-spacer{flex:1}
+.nav-spacer{flex:1;min-height:8px}
 .main{
   margin-left:var(--sidebar-width);height:100vh;
-  overflow-y:auto;padding:28px 36px;
+  overflow-y:auto;overflow-x:hidden;padding:28px 36px;
+  box-sizing:border-box;
   transition:background .3s,margin-left .3s;
 }
 /* 頁面內容：預設全寬；在超寬螢幕 (>1800px) 才設上限讓行長保持可讀性 */
@@ -143,7 +152,7 @@ html.light .logo-icon{background:rgba(108,99,255,.08)}
 @media(min-width:1800px){
   .page{max-width:1600px;margin:0 auto}
 }
-.user-info{padding:8px 24px;font-size:12px;color:var(--text3);margin-bottom:8px}
+.user-info{padding:6px 20px 12px;font-size:12px;color:var(--text3);flex-shrink:0;word-break:break-all}
 
 /* ============ 底部導航（手機） ============ */
 .bottom-nav{
@@ -418,8 +427,8 @@ tr.drag-over-bottom td{border-bottom:3px solid var(--primary)!important;border-b
 /* ============ 主題切換 ============ */
 .theme-toggle{
   display:flex;align-items:center;gap:8px;
-  padding:8px 24px;cursor:pointer;color:var(--text2);font-size:13px;
-  transition:.2s;min-height:44px;
+  padding:8px 20px;cursor:pointer;color:var(--text2);font-size:13px;
+  transition:.2s;min-height:40px;flex-shrink:0;
 }
 .theme-toggle:hover{color:var(--text)}
 .theme-toggle .toggle-track{
@@ -730,8 +739,9 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     margin-left:0;padding:16px;padding-bottom:88px;
     padding-top:calc(16px + env(safe-area-inset-top,0));
     height:100vh;
+    width:100%;max-width:100vw;
   }
-  .page{max-width:100%}
+  .page{max-width:100%;width:100%}
 
   /* 顯示漢堡按鈕（可選，目前使用底部導航所以隱藏） */
   .mobile-menu-btn{display:none}

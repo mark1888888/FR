@@ -518,7 +518,7 @@ function initNewUser() {
 /** 進入主應用畫面 */
 function enterApp() {
   document.getElementById('loginOverlay').style.display = 'none';
-  document.getElementById('app').style.display = 'flex';
+  document.getElementById('app').style.display = 'block';
   document.getElementById('sidebarUser').textContent = currentUser;
   var se = document.getElementById('settingsEmail');
   if (se) se.textContent = currentUser;
@@ -1054,7 +1054,7 @@ function renderAssets() {
   var titles = {
     bank: '銀行存款帳戶', cash: '現金帳戶', credit: '信用卡帳戶',
     receivable: '應收款追蹤', payable: '應付款追蹤', invest: '投資/其他資產',
-    property: '不動產資產', vehicle: '動產資產'
+    property: '不動產資產', vehicle: '動產資產', portfolio: '投資組合'
   };
   document.getElementById('assetTableTitle').textContent = titles[currentAssetTab] || currentAssetTab;
 
@@ -1066,11 +1066,27 @@ function renderAssets() {
     _renderVehicleTab(d); return;
   }
 
-  // ===== 應收款/應付款分頁：直接顯示「追蹤」介面，不顯示帳戶表格 =====
-  var isRecvPay = (currentAssetTab === 'receivable' || currentAssetTab === 'payable');
   var accountWrap = document.getElementById('assetAccountWrap');
   var assetAddBtn = document.getElementById('assetAddBtn');
   var recvSection = document.getElementById('receivableSection');
+  var portSection = document.getElementById('portfolioSection');
+
+  // ===== 投資組合分頁：直接顯示投資組合表 =====
+  if (currentAssetTab === 'portfolio') {
+    if (accountWrap) accountWrap.style.display = 'none';
+    if (assetAddBtn) assetAddBtn.parentElement.style.display = 'none';
+    if (recvSection) recvSection.style.display = 'none';
+    if (portSection) portSection.style.display = 'block';
+    // 清空原本 assetStats（portfolioStats 自己會填）
+    var as = document.getElementById('assetStats');
+    if (as) as.innerHTML = '';
+    renderPortfolio();
+    return;
+  }
+  if (portSection) portSection.style.display = 'none';
+
+  // ===== 應收款/應付款分頁：直接顯示「追蹤」介面，不顯示帳戶表格 =====
+  var isRecvPay = (currentAssetTab === 'receivable' || currentAssetTab === 'payable');
 
   if (isRecvPay) {
     // 隱藏帳戶表格、隱藏「+ 新增帳戶」按鈕
@@ -1774,7 +1790,7 @@ function renderAssetAnalysisSection() {
 }
 
 // ============ 投資情報 ============
-function renderInvest() { loadNews(); renderPortfolio(); loadStocks(); loadPreciousMetals(); loadCryptoNews(); }
+function renderInvest() { loadNews(); loadStocks(); loadPreciousMetals(); loadCryptoNews(); }
 
 // ------ 股票自動刷新機制 ------
 var _lastStockRefresh = null;  // timestamp (ms) of last successful refresh
@@ -1996,37 +2012,76 @@ async function loadPreciousMetals() {
   var el = document.getElementById('metalsContainer');
   if (!el) return;
   el.innerHTML = '<p style="color:var(--text3)">載入中...</p>';
-  var items = [];
-  // 貴金屬 & 加密貨幣：使用 CoinGecko 免費 API
-  try {
-    var r = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,tether&vs_currencies=usd,twd&include_24hr_change=true');
-    var cd = await r.json();
-    if (cd.bitcoin) items.push({ name: '比特幣 Bitcoin', code: 'BTC', price: cd.bitcoin.usd, priceTwd: cd.bitcoin.twd, change: cd.bitcoin.usd_24h_change || 0 });
-    if (cd.ethereum) items.push({ name: '以太幣 Ethereum', code: 'ETH', price: cd.ethereum.usd, priceTwd: cd.ethereum.twd, change: cd.ethereum.usd_24h_change || 0 });
-  } catch (e) { /* 靜默處理 */ }
-  // 貴金屬使用 metals.dev 或 fallback
+  var metals = [];
+  var cryptos = [];
+
+  // 貴金屬：metals.dev — 黃金、白銀、鉑金、鈀金
   try {
     var mr = await fetch('https://api.metals.dev/v1/latest?api_key=demo&currency=USD&unit=toz');
     var md = await mr.json();
     if (md.metals) {
-      if (md.metals.gold) items.unshift({ name: '黃金 Gold', code: 'XAU', price: md.metals.gold, priceTwd: md.metals.gold * (rates.USD ? 1/rates.USD : 31.5), change: 0, isOz: true });
-      if (md.metals.silver) items.unshift({ name: '白銀 Silver', code: 'XAG', price: md.metals.silver, priceTwd: md.metals.silver * (rates.USD ? 1/rates.USD : 31.5), change: 0, isOz: true });
+      var usdToTwd = rates.USD ? 1 / rates.USD : 31.5;
+      var metalDefs = [
+        { key: 'gold',      name: '黃金 Gold',      code: 'XAU' },
+        { key: 'silver',    name: '白銀 Silver',    code: 'XAG' },
+        { key: 'platinum',  name: '鉑金 Platinum',  code: 'XPT' },
+        { key: 'palladium', name: '鈀金 Palladium', code: 'XPD' }
+      ];
+      metalDefs.forEach(function(m) {
+        if (md.metals[m.key]) {
+          metals.push({
+            name: m.name, code: m.code,
+            price: md.metals[m.key],
+            priceTwd: md.metals[m.key] * usdToTwd,
+            change: 0, isOz: true
+          });
+        }
+      });
     }
-  } catch (e) {
-    // Fallback: 顯示靜態參考
-    if (!items.find(function(i) { return i.code === 'XAU'; })) {
-      items.unshift({ name: '黃金 Gold', code: 'XAU', price: null, priceTwd: null, change: 0, isOz: true });
-      items.unshift({ name: '白銀 Silver', code: 'XAG', price: null, priceTwd: null, change: 0, isOz: true });
-    }
+  } catch (e) { /* 靜默處理 */ }
+  // Fallback：若完全抓不到，至少顯示佔位
+  if (metals.length === 0) {
+    ['黃金 Gold|XAU', '白銀 Silver|XAG', '鉑金 Platinum|XPT', '鈀金 Palladium|XPD'].forEach(function(s) {
+      var p = s.split('|');
+      metals.push({ name: p[0], code: p[1], price: null, priceTwd: null, change: 0, isOz: true });
+    });
   }
-  if (!items.length) {
+
+  // 加密貨幣：CoinGecko — 主流 + 台灣常見
+  try {
+    var ids = 'bitcoin,ethereum,tether,solana,binancecoin,ripple,cardano,dogecoin';
+    var r = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=' + ids + '&vs_currencies=usd,twd&include_24hr_change=true');
+    var cd = await r.json();
+    var cryptoDefs = [
+      { id: 'bitcoin',     name: '比特幣 Bitcoin',  code: 'BTC' },
+      { id: 'ethereum',    name: '以太幣 Ethereum', code: 'ETH' },
+      { id: 'tether',      name: '泰達幣 Tether',   code: 'USDT' },
+      { id: 'solana',      name: 'Solana',          code: 'SOL' },
+      { id: 'binancecoin', name: '幣安幣 BNB',      code: 'BNB' },
+      { id: 'ripple',      name: '瑞波幣 XRP',      code: 'XRP' },
+      { id: 'cardano',     name: '艾達幣 Cardano',  code: 'ADA' },
+      { id: 'dogecoin',    name: '狗狗幣 Dogecoin', code: 'DOGE' }
+    ];
+    cryptoDefs.forEach(function(c) {
+      if (cd[c.id]) {
+        cryptos.push({
+          name: c.name, code: c.code,
+          price: cd[c.id].usd, priceTwd: cd[c.id].twd,
+          change: cd[c.id].usd_24h_change || 0
+        });
+      }
+    });
+  } catch (e) { /* 靜默處理 */ }
+
+  if (metals.length === 0 && cryptos.length === 0) {
     el.innerHTML = '<p style="color:var(--text3)">暫時無法取得價格資料，請稍後再試</p>';
     return;
   }
-  el.innerHTML = items.map(function(s) {
+
+  function renderItem(s) {
     var up = s.change >= 0;
-    var priceStr = s.price ? ('$' + s.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })) : '--';
-    var twdStr = s.priceTwd ? ('NT$' + Math.round(s.priceTwd).toLocaleString()) : '';
+    var priceStr = s.price ? ('$' + s.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: s.price < 1 ? 4 : 2 })) : '--';
+    var twdStr = s.priceTwd ? ('NT$' + (s.priceTwd < 10 ? s.priceTwd.toFixed(2) : Math.round(s.priceTwd).toLocaleString())) : '';
     var unit = s.isOz ? '/oz' : '';
     return '<div class="stock-card"><div><div class="stock-name">' + s.name +
       '</div><div class="stock-code">' + s.code + '</div></div>' +
@@ -2035,7 +2090,18 @@ async function loadPreciousMetals() {
       (s.change ? '<div class="stock-change ' + (up ? 'c-green' : 'c-red') + '">' +
       (up ? '+' : '') + s.change.toFixed(2) + '%</div>' : '') +
       '</div></div>';
-  }).join('');
+  }
+
+  var html = '';
+  if (metals.length) {
+    html += '<div class="stat-section-title" style="margin-top:4px">貴金屬（以盎司計）</div>';
+    html += metals.map(renderItem).join('');
+  }
+  if (cryptos.length) {
+    html += '<div class="stat-section-title" style="margin-top:16px">加密貨幣（24h 變化）</div>';
+    html += cryptos.map(renderItem).join('');
+  }
+  el.innerHTML = html;
 }
 
 async function loadCryptoNews() {

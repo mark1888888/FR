@@ -1,5 +1,67 @@
 # RichMark 更新記錄（前身為 FlowRich）
 
+## v1.9.6 — 2026-04-17 · 投資組合搬家 + 熱門幣/金屬擴充
+
+### 資訊架構調整
+- **「我的投資組合」從「投資情報」搬到「資產管理」**
+  - 資產管理 tab bar 新增「投資組合」分頁
+  - 點入此分頁會隱藏一般帳戶表，顯示「+ 新增持倉」按鈕與投資組合統計卡/明細表
+  - 理由：投資本質是資產，放在投資情報頁跟「新聞、追蹤、即時價」混在一起會有認知落差
+- **投資情報頁純化為「參考資訊」**：只剩
+  - 本日國際經濟趨勢
+  - 貴金屬 & 加密貨幣即時價格
+  - 台股追蹤
+  - 幣圈新聞
+
+### 貴金屬 & 加密貨幣擴充
+- **貴金屬 4 項**（原 2 項）：黃金 Gold / 白銀 Silver / 鉑金 Platinum / 鈀金 Palladium
+- **加密貨幣 8 項**（原 3 項）：BTC / ETH / USDT / SOL / BNB / XRP / ADA / DOGE
+- UI 加分區小標（「貴金屬」「加密貨幣」），不再混在一起
+- 小於 $1 的幣（如 ADA、DOGE）顯示到小數 4 位，以免看到 "$0.00"
+
+### 資料結構
+- `DB.portfolio` 資料結構不變，只是 UI 搬了位置
+- `renderPortfolio()` 函式保持不變，由新的 `currentAssetTab === 'portfolio'` 分支呼叫
+
+---
+
+## v1.9.5 — 2026-04-17 · 手機右側空白 bug 修正
+
+### 關鍵修正
+**手機版（含桌面切換過的）右側空出約 30% 空白**
+- Root cause：`enterApp()` 把 `.app` 設為 `display:flex`，但 `.sidebar` 和 `.bottom-nav` 是 `position:fixed` 不佔 flex slot，flex 容器內只剩 `.main` 一個 item
+- `.main` 作為 flex item 預設 `flex:0 1 auto`，只會取「內容寬度」，不會自動填滿剩餘空間
+- 結果：手機上 sidebar 寬度 0，但 `.main` 還是縮到 content 寬度，右側出現大片空白
+
+### 修法
+1. `enterApp()` 的 `display:'flex'` → `'block'`：sidebar 是 fixed，不需要 flex 容器
+2. `.main` 加 `overflow-x:hidden` 防止意外溢出
+3. `html, body { overflow-x:hidden; max-width:100vw }` 全域保險
+4. 手機版 `.main { width:100%; max-width:100vw }`、`.page { width:100% }` 明確設定
+
+登出時的 `display:'none'` 保持不變，不影響該邏輯。
+
+---
+
+## v1.9.4 — 2026-04-17 · 側邊欄捲動修正
+
+### 修正
+- **側邊欄內容過長被截斷**：11 個導航項目（含新增的「財務規劃」「財務成長」）在視口 < 640px 時會看不到底部的「主題切換」「系統設定」
+- 新增 `overflow-y:auto` 讓側邊欄內容超出時可垂直捲動
+- 4px 極細自訂捲動條（hover 時加深顏色提升可見度）
+- 所有 sidebar 子元素加 `flex-shrink:0` 避免 flex 容器壓扁
+
+### 緊湊化
+- Logo margin-bottom 從 32px → 20px
+- Nav-item padding 從 12×24 → 10×20，min-height 從 44 → 42
+- Theme-toggle padding 從 8×24 → 8×20，min-height 44 → 40
+- Sidebar 整體 padding 20 → 16
+- Logo-icon 從 32×32 → 28×28（保持清晰度）
+
+估算總高度從原本 ~760px 壓到 ~616px，大幅降低觸發捲動條的機會。
+
+---
+
 ## v1.9.3 — 2026-04-17 · 介面質感大升級
 
 ### 陰影系統
