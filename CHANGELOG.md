@@ -1,5 +1,27 @@
 # RichMark 更新記錄（前身為 FlowRich）
 
+## v1.9.7 — 2026-04-17 · 完整橫版 Logo + 深淺色切換
+
+### Logo 更新
+- **登入頁 & 側邊欄改用完整橫版 logo**（`images/logo.png`，含頭像 + RichMark 文字）
+- 取消原本「頭像圖 + 漸層文字」的組合，改為單一品牌圖像，視覺更一致
+- 登入頁拿掉單獨的 `<h1>RichMark</h1>`（文字已在 logo 內），保留副標「個人記帳理財系統」
+
+### 深淺色雙 Logo
+- 新增 `images/logo-white.png`（用 Python Pillow 從原圖生成，保留輪廓轉白色）
+- 淺色模式顯示 `logo.png`（灰色線條）
+- 深色模式顯示 `logo-white.png`（白色線條）
+- 實作方式：兩張 `<img>` 標籤加 `.light-only` / `.dark-only` class，CSS 根據 `html.light` 切換 `display`，無閃爍、無 FOUC
+- 白色版尺寸僅 5.9KB（比原 500KB 小非常多），載入幾乎無成本
+
+### 切換範例
+```html
+<img src="images/logo.png" class="brand-full light-only">
+<img src="images/logo-white.png" class="brand-full dark-only">
+```
+
+---
+
 ## v1.9.6 — 2026-04-17 · 投資組合搬家 + 熱門幣/金屬擴充
 
 ### 資訊架構調整

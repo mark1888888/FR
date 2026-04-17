@@ -66,6 +66,23 @@ button{cursor:pointer;border:none;background:none;color:inherit}
   box-shadow:0 8px 24px rgba(108,99,255,.25),0 0 0 1px var(--border);
 }
 html.light .login-logo{background:#fff}
+
+/* ============ 品牌 Logo 深淺色切換 ============ */
+/* 登入頁完整橫版 */
+.brand-full{
+  display:block;max-width:240px;width:80%;height:auto;
+  margin:0 auto 20px;object-fit:contain;
+}
+/* 側欄完整橫版 */
+.sidebar-brand{
+  display:block;height:32px;width:auto;max-width:100%;object-fit:contain;
+}
+/* 預設深色模式：顯示白色 logo */
+.light-only{display:none!important}
+.dark-only{display:block!important}
+/* 淺色模式：反過來 */
+html.light .light-only{display:block!important}
+html.light .dark-only{display:none!important}
 .login-box h1{
   font-size:28px;margin-bottom:8px;
   background:linear-gradient(135deg,var(--primary),var(--accent));
@@ -112,14 +129,10 @@ html,body{overflow-x:hidden;max-width:100vw}
 .sidebar::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
 .sidebar:hover::-webkit-scrollbar-thumb{background:var(--text3)}
 .sidebar .logo{
-  padding:0 20px;font-size:20px;font-weight:700;margin-bottom:20px;
-  background:linear-gradient(135deg,var(--primary),var(--accent));
-  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
-  display:flex;align-items:center;gap:8px;
+  padding:6px 20px 0;margin-bottom:20px;
+  display:flex;align-items:center;justify-content:flex-start;
   flex-shrink:0;
 }
-.logo-icon{width:28px;height:28px;border-radius:8px;object-fit:contain;background:rgba(255,255,255,.06);padding:3px;-webkit-text-fill-color:initial;flex-shrink:0}
-html.light .logo-icon{background:rgba(108,99,255,.08)}
 .nav-item{
   display:flex;align-items:center;gap:12px;
   padding:10px 20px;color:var(--text2);font-size:14px;

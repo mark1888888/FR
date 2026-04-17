@@ -19,8 +19,8 @@
 <!-- ==================== 登入畫面 ==================== -->
 <div class="login-overlay" id="loginOverlay">
   <div class="login-box" id="loginView">
-    <img src="images/logo-192.png" alt="RichMark" class="login-logo">
-    <h1>RichMark</h1>
+    <img src="images/logo.png" alt="RichMark" class="brand-full light-only">
+    <img src="images/logo-white.png" alt="RichMark" class="brand-full dark-only">
     <p>個人記帳理財系統（雲端版）</p>
     <div class="login-error" id="loginError"></div>
     <input type="email" id="loginUser" placeholder="Email" maxlength="60" autocomplete="email">
@@ -29,8 +29,8 @@
     <button class="btn-secondary" onclick="showRegister()">還沒有帳號？點此註冊</button>
   </div>
   <div class="login-box" id="registerView" style="display:none">
-    <img src="images/logo-192.png" alt="RichMark" class="login-logo">
-    <h1>RichMark</h1>
+    <img src="images/logo.png" alt="RichMark" class="brand-full light-only">
+    <img src="images/logo-white.png" alt="RichMark" class="brand-full dark-only">
     <p>建立新帳號</p>
     <div class="login-error" id="registerError"></div>
     <input type="email" id="newUser" placeholder="Email" maxlength="60" autocomplete="email">
@@ -46,7 +46,10 @@
 
   <!-- 桌面側邊欄 -->
   <div class="sidebar">
-    <div class="logo"><img src="images/logo-192.png" alt="RichMark" class="logo-icon">RichMark</div>
+    <div class="logo">
+      <img src="images/logo.png" alt="RichMark" class="sidebar-brand light-only">
+      <img src="images/logo-white.png" alt="RichMark" class="sidebar-brand dark-only">
+    </div>
     <div class="user-info" id="sidebarUser"></div>
     <div class="nav-item active" data-page="dashboard" onclick="switchPage('dashboard')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
