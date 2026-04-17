@@ -1436,6 +1436,31 @@ async function loadNews() {
     '<div class="news-card"><div class="news-title">投資提醒</div><div class="news-meta">以上為一般性資訊，不構成投資建議。投資有風險，請依個人狀況審慎評估。</div></div>';
 }
 
+/** 透過 CORS Proxy 查詢 TWSE 即時股價（mis.twse.com.tw 直連會被瀏覽器 CORS 擋下）。
+ *  ex_chQuery 範例：'tse_2330.tw|otc_6488.tw'
+ *  依序嘗試多個公開 proxy，任一成功即回傳；全失敗回傳 null。
+ *  回傳格式與 TWSE 原始 JSON 相同（含 msgArray）。
+ */
+async function fetchTWSE(ex_chQuery) {
+  var twseUrl = 'https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=' + ex_chQuery + '&json=1&delay=0&_=' + Date.now();
+  var proxies = [
+    function(u) { return 'https://corsproxy.io/?' + encodeURIComponent(u); },
+    function(u) { return 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u); },
+    function(u) { return 'https://api.codetabs.com/v1/proxy?quest=' + u; }
+  ];
+  for (var i = 0; i < proxies.length; i++) {
+    try {
+      var r = await fetch(proxies[i](twseUrl));
+      if (!r.ok) continue;
+      var text = await r.text();
+      if (!text) continue;
+      var data = JSON.parse(text);
+      if (data && data.msgArray) return data;
+    } catch (e) { /* 嘗試下一個 proxy */ }
+  }
+  return null;
+}
+
 async function loadStocks() {
   var d = U(), el = document.getElementById('stockContainer');
   if (!d.watchStocks || !d.watchStocks.length) {
@@ -1482,14 +1507,13 @@ async function loadStocks() {
   var allResults = [];
   var loadedCodes = [];
 
-  // 方法 1：TWSE 上市（主要）— 同時查詢 tse 與 otc
+  // 方法 1：TWSE 上市（主要）— 同時查詢 tse 與 otc（經 CORS Proxy）
   try {
     var tseQuery = d.watchStocks.map(function(c) { return 'tse_' + c + '.tw'; }).join('|');
     var otcQuery = d.watchStocks.map(function(c) { return 'otc_' + c + '.tw'; }).join('|');
     var fullQuery = tseQuery + '|' + otcQuery;
-    var r = await fetch('https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=' + fullQuery + '&json=1&_=' + Date.now());
-    var data = await r.json();
-    if (data.msgArray && data.msgArray.length) {
+    var data = await fetchTWSE(fullQuery);
+    if (data && data.msgArray && data.msgArray.length) {
       var parsed = parseTWSE(data.msgArray);
       // 去重：同一股票代號若 tse 與 otc 都有回傳，保留有價格的那筆
       var seen = {};
@@ -1509,17 +1533,15 @@ async function loadStocks() {
     for (var i = 0; i < remaining.length; i++) {
       var code = remaining[i];
       try {
-        var r1 = await fetch('https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_' + code + '.tw&json=1&_=' + Date.now());
-        var d1 = await r1.json();
-        if (d1.msgArray && d1.msgArray.length) {
+        var d1 = await fetchTWSE('tse_' + code + '.tw');
+        if (d1 && d1.msgArray && d1.msgArray.length) {
           var p = parseTWSE(d1.msgArray);
           if (p[0] && p[0].price > 0) { allResults.push(p[0]); loadedCodes.push(code); continue; }
         }
       } catch (e) { /* 靜默處理 */ }
       try {
-        var r2 = await fetch('https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=otc_' + code + '.tw&json=1&_=' + Date.now());
-        var d2 = await r2.json();
-        if (d2.msgArray && d2.msgArray.length) {
+        var d2 = await fetchTWSE('otc_' + code + '.tw');
+        if (d2 && d2.msgArray && d2.msgArray.length) {
           var p2 = parseTWSE(d2.msgArray);
           if (p2[0] && p2[0].price > 0) { allResults.push(p2[0]); loadedCodes.push(code); continue; }
         }
@@ -1651,14 +1673,13 @@ async function renderPortfolio() {
   // 收集需要查詢即時股價的代號
   var stockCodes = d.portfolio.filter(function(p) { return p.type === 'stock' && p.code; }).map(function(p) { return p.code; });
 
-  // 查詢 TWSE 即時價格
+  // 查詢 TWSE 即時價格（經 CORS Proxy）
   if (stockCodes.length > 0) {
     try {
       var tseQ = stockCodes.map(function(c) { return 'tse_' + c + '.tw'; }).join('|');
       var otcQ = stockCodes.map(function(c) { return 'otc_' + c + '.tw'; }).join('|');
-      var r = await fetch('https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=' + tseQ + '|' + otcQ + '&json=1&_=' + Date.now());
-      var data = await r.json();
-      if (data.msgArray) {
+      var data = await fetchTWSE(tseQ + '|' + otcQ);
+      if (data && data.msgArray) {
         data.msgArray.forEach(function(s) {
           var price = parseFloat(s.z) || parseFloat(s.y) || 0;
           if (price > 0) _portfolioPrices[s.c] = price;
