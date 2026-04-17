@@ -598,19 +598,23 @@ function renderDashboard() {
     .reduce(function(s, r) { return s + convert(r.amount, r.currency, cur); }, 0);
   var debt = d.accounts.filter(function(a) { return a.type === 'credit'; })
     .reduce(function(s, a) { return s + convert(Math.abs(a.balance), a.currency, cur); }, 0);
-  // 總資產 = 正資產 + 未收款（所有擁有的資源）
-  var tA = posAsset + rec;
-  // 淨資產 = 總資產 - 應付款 - 負債（扣除義務後的淨值）
-  var netA = tA - pay - debt;
+  // 總負債 = 應付款 + 信用卡負債
+  var totalLiab = pay + debt;
+  // 淨資產 = 正資產 + 未收款 − 總負債（標準 Net Worth 定義）
+  var netA = posAsset + rec - totalLiab;
 
-  document.getElementById('dashStats').innerHTML =
-    '<div class="stat-card"><div class="label">總資產</div><div class="value c-blue">' + fmt(tA, cur) + '</div><div class="sub">含未收款</div></div>' +
-    '<div class="stat-card"><div class="label">淨資產</div><div class="value c-primary">' + fmt(netA, cur) + '</div><div class="sub">扣除應付款與負債</div></div>' +
+  // 上區：資產狀況（存量）— 4 張卡，金額不重疊
+  document.getElementById('dashStatsAssets').innerHTML =
+    '<div class="stat-card"><div class="label">淨資產</div><div class="value c-primary">' + fmt(netA, cur) + '</div><div class="sub">正資產 + 未收款 − 總負債</div></div>' +
+    '<div class="stat-card"><div class="label">正資產</div><div class="value c-blue">' + fmt(posAsset, cur) + '</div><div class="sub">銀行+現金+投資+不動產+動產</div></div>' +
+    '<div class="stat-card"><div class="label">未收款</div><div class="value c-orange">' + fmt(rec, cur) + '</div><div class="sub">應收帳款</div></div>' +
+    '<div class="stat-card"><div class="label">總負債</div><div class="value c-red">' + fmt(totalLiab, cur) + '</div><div class="sub">應付款 ' + fmt(pay, cur) + ' + 信用卡 ' + fmt(debt, cur) + '</div></div>';
+
+  // 下區：本月收支（流量）— 3 張卡
+  document.getElementById('dashStatsFlow').innerHTML =
     '<div class="stat-card"><div class="label">收入</div><div class="value c-green">' + fmt(tI, cur) + '</div><div class="sub">' + inc.length + ' 筆</div></div>' +
     '<div class="stat-card"><div class="label">支出</div><div class="value c-red">' + fmt(tE, cur) + '</div><div class="sub">' + exp.length + ' 筆</div></div>' +
-    '<div class="stat-card"><div class="label">淨收支</div><div class="value ' + (net >= 0 ? 'c-green' : 'c-red') + '">' + (net >= 0 ? '+' : '') + fmt(net, cur) + '</div></div>' +
-    (rec > 0 ? '<div class="stat-card"><div class="label">未收款</div><div class="value c-orange">' + fmt(rec, cur) + '</div></div>' : '') +
-    (pay > 0 ? '<div class="stat-card"><div class="label">應付款</div><div class="value c-red">' + fmt(pay, cur) + '</div></div>' : '');
+    '<div class="stat-card"><div class="label">淨收支</div><div class="value ' + (net >= 0 ? 'c-green' : 'c-red') + '">' + (net >= 0 ? '+' : '') + fmt(net, cur) + '</div><div class="sub">收入 − 支出</div></div>';
 
   // 最近交易
   var all = [
@@ -1264,15 +1268,16 @@ function renderAssetAnalysisSection() {
   var creditAccts = d.accounts.filter(function(a) { return a.type === 'credit'; });
   var tDebt = creditAccts.reduce(function(s, a) { return s + convert(Math.abs(a.balance), a.currency, cur); }, 0);
 
-  // 總資產 = 正資產 + 未收款 - 應付款 - 負債
+  // 總資產 = 正資產 + 未收款（所有擁有的資源）
   var tA = tPositive + tRec;
-  var netAsset = tPositive - tDebt;
+  // 淨資產 = 正資產 + 未收款 − 應付款 − 負債（標準 Net Worth 定義，與資產總覽一致）
+  var netAsset = tPositive + tRec - tPay - tDebt;
 
   // 統計卡片
   try {
     document.getElementById('aasStats').innerHTML =
-      '<div class="stat-card"><div class="label">正資產</div><div class="value c-blue">' + fmt(tPositive, cur) + '</div><div class="sub">銀行+現金+投資</div></div>' +
-      '<div class="stat-card"><div class="label">淨資產</div><div class="value c-primary">' + fmt(netAsset, cur) + '</div><div class="sub">正資產 - 負債</div></div>' +
+      '<div class="stat-card"><div class="label">正資產</div><div class="value c-blue">' + fmt(tPositive, cur) + '</div><div class="sub">銀行+現金+投資+不動產+動產</div></div>' +
+      '<div class="stat-card"><div class="label">淨資產</div><div class="value c-primary">' + fmt(netAsset, cur) + '</div><div class="sub">正資產 + 未收款 − 應付款 − 負債</div></div>' +
       '<div class="stat-card"><div class="label">' + rangeLabel + '收入</div><div class="value c-green">' + fmt(periodInc, cur) + '</div></div>' +
       '<div class="stat-card"><div class="label">' + rangeLabel + '支出</div><div class="value c-red">' + fmt(periodExp, cur) + '</div></div>' +
       '<div class="stat-card"><div class="label">負債（信用卡）</div><div class="value c-red">' + fmt(tDebt, cur) + '</div><div class="sub">' + creditAccts.length + ' 張</div></div>' +
