@@ -1,5 +1,46 @@
 # RichMark 更新記錄（前身為 FlowRich）
 
+## v1.9.3 — 2026-04-17 · 介面質感大升級
+
+### 陰影系統
+- **新增 5 層陰影變數**（深淺色模式各自調校）：`--shadow-sm / -md / -lg / -xl / -glow`
+- 深色模式使用較深的半透明黑；淺色模式使用 `rgba(15,23,42,.x)` 較柔和
+- 額外提供 `--shadow-inset`（內側高光）、`--shadow-glow-accent`（青色光暈）
+- 所有卡片/表格/圖表容器預設套 shadow-sm，hover 升級到 shadow-md
+
+### Hover Lift + 微互動
+- **卡片 hover 上浮 3px + 陰影加深**（stat-card、news-card、stock-card）
+- 卡片加入 `::before` 漸層光暈層，hover 時淡入，提供深度感
+- Primary 按鈕：hover 上浮 + 紫色光暈擴散、`brightness(1.05)`、active 縮 98% 回彈
+- Secondary 按鈕 hover 加框色與 shadow-md
+- 側邊欄 nav-item：hover 時內縮 4px、icon 縮放 1.1x、active 有左邊指示條 scale-in 動畫
+- 底部導航 active 半透明紫底、點擊縮 92% 彈性回饋
+
+### 進入動畫
+- **Modal**：`modalIn` 從下 16px + scale .96 彈入（cubic-bezier(.22,1,.36,1)）、遮罩 `backdrop-filter:blur(4px)`
+- **Page 切換**：`pageIn` 淡入 + 向上 8px
+- **Toast 通知**：從上滑入 + scale .96 → 1，消失時反向滑出
+- **同步狀態列**：從右側滑入 + scale；儲存中有脈動圓點 (`pulse` keyframe)
+- **登入框**：進場有 modalIn 動畫 + shadow-xl
+
+### 質感點綴
+- 頁面標題套漸層色（深色模式）：文字 → 紫色光效
+- 勳章卡「🏅 跳脫老鼠賽跑」加 `medalGlow` 2.4 秒呼吸光暈
+- 進度條 `width` 動畫延長至 .8s 更優雅
+- Tab 按鈕 active 狀態：紫色漸層背景 + 內陰影高光
+- 所有 transition 統一用 `var(--trans-base)` 等 CSS 變數方便全域調整
+
+### 無障礙支援
+- `@media (prefers-reduced-motion:reduce)` 全域關閉動畫（除了必要的微動），尊重使用者系統設定
+- `scroll-behavior:auto`（reduced motion 下）
+
+### 細節改動
+- Primary 按鈕加 `inset 0 1px 0 rgba(255,255,255,.15)` 內側高光，視覺上像實體按鈕
+- Stat-card 數值加 `letter-spacing:-.02em`，大字更緊湊
+- 側邊欄整體加 shadow-md 與主區隔離
+
+---
+
 ## v1.9.2 — 2026-04-17 · 品牌更名 RichMark
 
 ### 改變

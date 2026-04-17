@@ -4735,14 +4735,18 @@ function showToast(msg, type) {
     error: 'background:rgba(239,68,68,.15);color:var(--red);border:1px solid rgba(239,68,68,.3)',
     info: 'background:rgba(108,99,255,.15);color:var(--primary-light);border:1px solid rgba(108,99,255,.3)'
   };
-  el.style.cssText = 'position:fixed;top:24px;left:50%;transform:translateX(-50%);z-index:9999;padding:14px 28px;border-radius:12px;font-size:15px;font-weight:500;pointer-events:none;opacity:0;transition:opacity .3s;white-space:nowrap;' + (colors[type] || colors.info);
+  el.style.cssText = 'position:fixed;top:24px;left:50%;z-index:9999;padding:14px 28px;border-radius:14px;font-size:15px;font-weight:500;pointer-events:none;opacity:0;transform:translate(-50%,-12px) scale(.96);transition:opacity .3s cubic-bezier(.22,1,.36,1),transform .3s cubic-bezier(.22,1,.36,1);white-space:nowrap;box-shadow:0 12px 28px rgba(0,0,0,.25);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);' + (colors[type] || colors.info);
   el.textContent = msg;
-  // 淡入
-  requestAnimationFrame(function() { el.style.opacity = '1'; });
-  // 自動消失
+  // 淡入 + 下滑
+  requestAnimationFrame(function() {
+    el.style.opacity = '1';
+    el.style.transform = 'translate(-50%,0) scale(1)';
+  });
+  // 自動消失（帶上滑動畫）
   clearTimeout(window._toastTimer);
   window._toastTimer = setTimeout(function() {
     el.style.opacity = '0';
+    el.style.transform = 'translate(-50%,-8px) scale(.96)';
   }, 2500);
 }
 
