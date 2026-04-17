@@ -111,6 +111,8 @@ function defaultUserData() {
     // v1.9.0 財務成長模組（遊戲化）
     achievements: {},    // { achievementId: { unlockedAt, data } }
     personality: null,   // { type, score, updatedAt }
+    // v1.9.9 個人資料（暱稱 + 頭像）
+    profile: null,       // { nickname, avatar, avatarType:'emoji'|'image' }
     updated_at: new Date().toISOString()
   };
 }
@@ -393,6 +395,7 @@ function U() {
   if (!DB.recurring) DB.recurring = [];
   if (!DB.savingsGoals) DB.savingsGoals = [];
   if (!DB.achievements) DB.achievements = {};
+  if (!DB.profile) DB.profile = { nickname: '', avatar: '🙂', avatarType: 'emoji' };
   if (!DB.updated_at) DB.updated_at = new Date().toISOString();
   if (!_legacyMigrated) {
     _legacyMigrated = true;
@@ -519,7 +522,8 @@ function initNewUser() {
 function enterApp() {
   document.getElementById('loginOverlay').style.display = 'none';
   document.getElementById('app').style.display = 'block';
-  document.getElementById('sidebarUser').textContent = currentUser;
+  renderSidebarUser();
+  renderSettingsProfile();
   var se = document.getElementById('settingsEmail');
   if (se) se.textContent = currentUser;
   initMonthSelectors();
@@ -528,6 +532,140 @@ function enterApp() {
   loadCategories();
   startPeriodicSync();
   startSessionCheck(); // 啟動單一裝置檢查
+}
+
+// ============ 個人資料（v1.9.9） ============
+/** 預設 emoji 頭像選項 */
+var PROFILE_AVATAR_PRESETS = ['🙂','😎','🤓','🧑‍💻','👨','👩','🧑','👱','🦊','🐱','🐶','🐻','🦁','🐼','🐨','🐸','🚀','💼','💰','💎','⭐','🎯','🔥','🌟'];
+
+/** 取得目前個人資料，自動回落為預設 */
+function getProfile() {
+  var d = U();
+  if (!d.profile) d.profile = { nickname: '', avatar: '🙂', avatarType: 'emoji' };
+  return d.profile;
+}
+
+/** 渲染頭像 HTML（依 avatarType 自動切換 emoji / img） */
+function renderAvatarHtml(profile, cls) {
+  cls = cls || 'user-avatar';
+  if (profile && profile.avatarType === 'image' && profile.avatar) {
+    return '<div class="' + cls + '"><img src="' + profile.avatar + '" alt="avatar"></div>';
+  }
+  var emoji = (profile && profile.avatar) ? profile.avatar : '🙂';
+  return '<div class="' + cls + '">' + emoji + '</div>';
+}
+
+/** 側欄使用者區渲染 */
+function renderSidebarUser() {
+  var el = document.getElementById('sidebarUser');
+  if (!el) return;
+  var p = getProfile();
+  var nick = p.nickname || (currentUser ? currentUser.split('@')[0] : '使用者');
+  el.innerHTML = renderAvatarHtml(p) +
+    '<div class="user-meta">' +
+      '<div class="user-nick">' + nick + '</div>' +
+      '<div class="user-email">' + (currentUser || '') + '</div>' +
+    '</div>';
+}
+
+/** 打開個人資料編輯 Modal */
+function openProfileModal() {
+  var p = getProfile();
+  var m = document.getElementById('modalContent');
+  var presetGrid = PROFILE_AVATAR_PRESETS.map(function(e) {
+    var selected = (p.avatarType === 'emoji' && p.avatar === e) ? ' selected' : '';
+    return '<div class="avatar-emoji-opt' + selected + '" onclick="_pickAvatarEmoji(\'' + e + '\',this)">' + e + '</div>';
+  }).join('');
+  var currentPreview = renderAvatarHtml(p, 'user-avatar-lg');
+  m.innerHTML = '<h3>個人資料</h3>' +
+    '<div id="profilePreview" style="text-align:center;margin-bottom:20px">' + currentPreview + '</div>' +
+    '<div class="form-group"><label>暱稱</label>' +
+      '<input type="text" id="f_nickname" maxlength="30" placeholder="請輸入暱稱" value="' + (p.nickname || '').replace(/"/g,'&quot;') + '"></div>' +
+    '<div class="form-group"><label>選擇 Emoji 頭像</label>' +
+      '<div class="avatar-emoji-grid" id="avatarEmojiGrid">' + presetGrid + '</div></div>' +
+    '<div class="form-group"><label>或上傳自訂圖片（自動縮成 192×192）</label>' +
+      '<input type="file" id="f_avatarFile" accept="image/*" onchange="_handleAvatarUpload(event)"></div>' +
+    '<input type="hidden" id="f_avatarType" value="' + p.avatarType + '">' +
+    '<input type="hidden" id="f_avatarData" value="' + (p.avatarType === 'emoji' ? p.avatar : '') + '">' +
+    '<div class="modal-actions">' +
+      '<button class="btn btn-s" onclick="closeModal()">取消</button>' +
+      '<button class="btn btn-p" onclick="saveProfile()">儲存</button>' +
+    '</div>';
+  document.getElementById('modalOverlay').classList.add('show');
+}
+
+/** 選擇 emoji 頭像 */
+function _pickAvatarEmoji(emoji, el) {
+  document.querySelectorAll('#avatarEmojiGrid .avatar-emoji-opt').forEach(function(x) { x.classList.remove('selected'); });
+  if (el) el.classList.add('selected');
+  document.getElementById('f_avatarType').value = 'emoji';
+  document.getElementById('f_avatarData').value = emoji;
+  document.getElementById('profilePreview').innerHTML =
+    '<div class="user-avatar-lg">' + emoji + '</div>';
+  // 清空上傳檔案欄位
+  var fileInput = document.getElementById('f_avatarFile');
+  if (fileInput) fileInput.value = '';
+}
+
+/** 處理圖片上傳：resize 到 192×192 後轉 dataURL */
+function _handleAvatarUpload(event) {
+  var file = event.target.files[0];
+  if (!file) return;
+  if (!file.type.startsWith('image/')) { showToast('請選擇圖片檔案', 'warn'); return; }
+  if (file.size > 5 * 1024 * 1024) { showToast('圖片過大（上限 5MB）', 'warn'); return; }
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    var img = new Image();
+    img.onload = function() {
+      var size = 192;
+      var canvas = document.createElement('canvas');
+      canvas.width = size; canvas.height = size;
+      var ctx = canvas.getContext('2d');
+      // 裁成方形（取較短邊）
+      var sw = img.width, sh = img.height;
+      var sx = 0, sy = 0, s = Math.min(sw, sh);
+      sx = (sw - s) / 2; sy = (sh - s) / 2;
+      ctx.drawImage(img, sx, sy, s, s, 0, 0, size, size);
+      var dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+      document.getElementById('f_avatarType').value = 'image';
+      document.getElementById('f_avatarData').value = dataUrl;
+      document.getElementById('profilePreview').innerHTML =
+        '<div class="user-avatar-lg"><img src="' + dataUrl + '" alt="avatar"></div>';
+      // 清除 emoji 選取
+      document.querySelectorAll('#avatarEmojiGrid .avatar-emoji-opt').forEach(function(x) { x.classList.remove('selected'); });
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+function saveProfile() {
+  var d = U();
+  var nickname = document.getElementById('f_nickname').value.trim();
+  var avatarType = document.getElementById('f_avatarType').value || 'emoji';
+  var avatarData = document.getElementById('f_avatarData').value;
+  if (!avatarData) avatarData = '🙂';
+  d.profile = { nickname: nickname, avatar: avatarData, avatarType: avatarType };
+  save();
+  closeModal();
+  renderSidebarUser();
+  // 若設定頁有開著，也刷新
+  if (document.getElementById('settingsProfile')) renderSettingsProfile();
+  showToast('個人資料已更新', 'success');
+}
+
+/** 設定頁「個人資料」區塊渲染 */
+function renderSettingsProfile() {
+  var el = document.getElementById('settingsProfile');
+  if (!el) return;
+  var p = getProfile();
+  var nick = p.nickname || '尚未設定暱稱';
+  el.innerHTML = renderAvatarHtml(p, 'user-avatar-lg') +
+    '<div style="text-align:center">' +
+      '<div style="font-size:18px;font-weight:600;color:var(--text);margin-bottom:4px">' + nick + '</div>' +
+      '<div style="font-size:13px;color:var(--text3);margin-bottom:16px">' + (currentUser || '') + '</div>' +
+      '<button class="btn btn-p btn-sm" onclick="openProfileModal()">✏️ 編輯個人資料</button>' +
+    '</div>';
 }
 
 async function doLogout() {
@@ -1875,8 +2013,8 @@ async function loadNews() {
  *  依序嘗試多個公開 proxy，任一成功即回傳；全失敗回傳 null。
  *  回傳格式與 TWSE 原始 JSON 相同（含 msgArray）。
  */
-async function fetchTWSE(ex_chQuery) {
-  var twseUrl = 'https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=' + ex_chQuery + '&json=1&delay=0&_=' + Date.now();
+/** 依序嘗試 3 個公開 CORS Proxy 取得 JSON；失敗回傳 null。 */
+async function _fetchJSONViaProxy(url, validate) {
   var proxies = [
     function(u) { return 'https://corsproxy.io/?' + encodeURIComponent(u); },
     function(u) { return 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u); },
@@ -1884,15 +2022,20 @@ async function fetchTWSE(ex_chQuery) {
   ];
   for (var i = 0; i < proxies.length; i++) {
     try {
-      var r = await fetch(proxies[i](twseUrl));
+      var r = await fetch(proxies[i](url));
       if (!r.ok) continue;
       var text = await r.text();
       if (!text) continue;
       var data = JSON.parse(text);
-      if (data && data.msgArray) return data;
+      if (!validate || validate(data)) return data;
     } catch (e) { /* 嘗試下一個 proxy */ }
   }
   return null;
+}
+
+async function fetchTWSE(ex_chQuery) {
+  var twseUrl = 'https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=' + ex_chQuery + '&json=1&delay=0&_=' + Date.now();
+  return await _fetchJSONViaProxy(twseUrl, function(d) { return d && d.msgArray; });
 }
 
 async function loadStocks() {
@@ -2015,35 +2158,64 @@ async function loadPreciousMetals() {
   var metals = [];
   var cryptos = [];
 
-  // 貴金屬：metals.dev — 黃金、白銀、鉑金、鈀金
+  // 貴金屬：黃金、白銀、鉑金、鈀金（metals.dev 與 Yahoo 期貨都需 CORS Proxy）
+  var usdToTwd = rates.USD ? 1 / rates.USD : 31.5;
+  var metalDefs = [
+    { key: 'gold',      yahoo: 'GC=F', name: '黃金 Gold',      code: 'XAU' },
+    { key: 'silver',    yahoo: 'SI=F', name: '白銀 Silver',    code: 'XAG' },
+    { key: 'platinum',  yahoo: 'PL=F', name: '鉑金 Platinum',  code: 'XPT' },
+    { key: 'palladium', yahoo: 'PA=F', name: '鈀金 Palladium', code: 'XPD' }
+  ];
+
+  // Primary：CORS Proxy + metals.dev demo
   try {
-    var mr = await fetch('https://api.metals.dev/v1/latest?api_key=demo&currency=USD&unit=toz');
-    var md = await mr.json();
-    if (md.metals) {
-      var usdToTwd = rates.USD ? 1 / rates.USD : 31.5;
-      var metalDefs = [
-        { key: 'gold',      name: '黃金 Gold',      code: 'XAU' },
-        { key: 'silver',    name: '白銀 Silver',    code: 'XAG' },
-        { key: 'platinum',  name: '鉑金 Platinum',  code: 'XPT' },
-        { key: 'palladium', name: '鈀金 Palladium', code: 'XPD' }
-      ];
+    var md = await _fetchJSONViaProxy(
+      'https://api.metals.dev/v1/latest?api_key=demo&currency=USD&unit=toz',
+      function(d) { return d && d.metals; }
+    );
+    if (md && md.metals) {
       metalDefs.forEach(function(m) {
         if (md.metals[m.key]) {
           metals.push({
             name: m.name, code: m.code,
-            price: md.metals[m.key],
-            priceTwd: md.metals[m.key] * usdToTwd,
+            price: md.metals[m.key], priceTwd: md.metals[m.key] * usdToTwd,
             change: 0, isOz: true
           });
         }
       });
     }
   } catch (e) { /* 靜默處理 */ }
-  // Fallback：若完全抓不到，至少顯示佔位
+
+  // Fallback：用 Yahoo Finance 期貨（經 CORS Proxy）
   if (metals.length === 0) {
-    ['黃金 Gold|XAU', '白銀 Silver|XAG', '鉑金 Platinum|XPT', '鈀金 Palladium|XPD'].forEach(function(s) {
-      var p = s.split('|');
-      metals.push({ name: p[0], code: p[1], price: null, priceTwd: null, change: 0, isOz: true });
+    try {
+      for (var i = 0; i < metalDefs.length; i++) {
+        var m = metalDefs[i];
+        var yahooUrl = 'https://query1.finance.yahoo.com/v8/finance/chart/' + encodeURIComponent(m.yahoo) + '?interval=1d&range=5d';
+        var yd = await _fetchJSONViaProxy(yahooUrl, function(d) {
+          return d && d.chart && d.chart.result && d.chart.result[0];
+        });
+        if (yd && yd.chart && yd.chart.result && yd.chart.result[0]) {
+          var meta = yd.chart.result[0].meta || {};
+          var price = meta.regularMarketPrice || meta.previousClose;
+          var prev = meta.previousClose || meta.chartPreviousClose;
+          if (price) {
+            var change = prev ? ((price - prev) / prev) * 100 : 0;
+            metals.push({
+              name: m.name, code: m.code,
+              price: price, priceTwd: price * usdToTwd,
+              change: change, isOz: true
+            });
+          }
+        }
+      }
+    } catch (e) { /* 靜默處理 */ }
+  }
+
+  // 最後 fallback：顯示佔位卡（價格空白）
+  if (metals.length === 0) {
+    metalDefs.forEach(function(m) {
+      metals.push({ name: m.name, code: m.code, price: null, priceTwd: null, change: 0, isOz: true });
     });
   }
 

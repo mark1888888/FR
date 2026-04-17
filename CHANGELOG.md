@@ -1,5 +1,43 @@
 # RichMark 更新記錄（前身為 FlowRich）
 
+## v1.9.9 — 2026-04-17 · 個人資料（暱稱 + 頭像）
+
+### 新功能
+- **側邊欄使用者卡**：原本只顯示 email，改為頭像 + 暱稱 + email 三行式卡片
+  - 整個卡片可點擊，直接打開「個人資料」編輯 Modal
+  - 手機版 hover 狀態換成 active 縮放回饋
+- **個人資料編輯 Modal**：
+  - 大尺寸頭像預覽（96×96 圓形）
+  - 暱稱輸入（最多 30 字）
+  - **24 個 emoji 預設頭像**可選（人物、動物、勵志圖示等）
+  - 或**上傳自訂圖片**：自動裁成方形 → 縮成 192×192 → JPEG 品質 85% 壓縮後存為 Base64 dataURL（約 5-20KB）
+  - 上限 5MB 來源檔（太大會跳提示）
+- **設定頁新增「個人資料」卡片**：顯示 96×96 頭像 + 暱稱 + email + 編輯按鈕，點擊也會打開同一個 Modal
+
+### 資料結構
+```js
+DB.profile = {
+  nickname: string,
+  avatar: string,            // emoji 或 dataURL
+  avatarType: 'emoji'|'image'
+}
+```
+
+首次載入預設頭像 🙂、暱稱空（側欄會自動用 email 的 @ 前段當顯示暱稱）
+
+---
+
+## v1.9.8 — 2026-04-17 · 貴金屬價 CORS 修正
+
+### 修正
+- **貴金屬價沒有顯示**：`metals.dev` API 不支援瀏覽器 CORS，直接 `fetch` 會被擋
+- 解法：改走 CORS Proxy（與 TWSE 股價同一套代理鏈：`corsproxy.io` → `allorigins.win` → `codetabs.com`）
+- 新增 `_fetchJSONViaProxy(url, validate)` 共用函式；`fetchTWSE` 也改用此函式，減少重複碼
+- **新增 Yahoo Finance 期貨備援**：若 metals.dev demo key 失效或 rate limited，自動改用 Yahoo `query1.finance.yahoo.com/v8/finance/chart/GC=F`（鉑金 PL=F、鈀金 PA=F、白銀 SI=F 類似）經同一組 CORS Proxy 取得；可抓到 24h 變動百分比
+- 全部失敗時才退回「佔位卡」無價格顯示
+
+---
+
 ## v1.9.7 — 2026-04-17 · 完整橫版 Logo + 深淺色切換
 
 ### Logo 更新
