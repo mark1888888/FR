@@ -1162,13 +1162,21 @@ function renderExpense() {
     var transferInfo = e.payMethod === '銀行轉帳' && e.transferAccount ? '<br><small style="color:var(--text3)">轉入：' + e.transferAccount + '</small>' : '';
     var mainCat2 = (e.category || '').split(' > ')[0];
     var isSel = _selectedExpenses.has(e.id);
+    // v1.10.3：負值 = 點數折抵/回饋/退款，綠色顯示 + 標籤
+    var isRefund = e.amount < 0;
+    var amtCell = isRefund
+      ? '<td class="c-green" style="font-weight:600">+' + fmt(Math.abs(e.amount), e.currency) +
+        '<span class="tag tag-green" style="font-size:10px;margin-left:6px;padding:2px 6px">🎁 折抵</span></td>'
+      : '<td class="c-red" style="font-weight:600">\u2212' + fmt(e.amount, e.currency) + '</td>';
+    var catCell = isRefund
+      ? '<td><span class="tag tag-green"><span class="cat-icon">🎁</span>' + _getCatDisplay(e.category) + '</span></td>'
+      : '<td><span class="tag tag-red"><span class="cat-icon">' + getIcon(mainCat2) + '</span>' + _getCatDisplay(e.category) + '</span></td>';
     return '<tr' + (isSel ? ' class="row-selected"' : '') + '>' +
       '<td><input type="checkbox" class="row-check" data-eid="' + e.id + '" ' + (isSel ? 'checked' : '') + ' onclick="toggleExpenseSelect(\'' + e.id + '\',this)"></td>' +
-      '<td>' + e.date + '</td><td><span class="tag tag-red"><span class="cat-icon">' +
-      getIcon(mainCat2) + '</span>' + _getCatDisplay(e.category) + '</span></td><td>' + (e.note || '-') +
-      '</td><td>' + (e.payTo || '-') + '</td><td>' + (e.usedBy || '-') +
-      '</td><td class="c-red" style="font-weight:600">\u2212' + fmt(e.amount, e.currency) +
-      '</td><td>' + e.currency + '</td><td><span class="tag ' + tc2 + '">' + e.payMethod +
+      '<td>' + e.date + '</td>' + catCell + '<td>' + (e.note || '-') +
+      '</td><td>' + (e.payTo || '-') + '</td><td>' + (e.usedBy || '-') + '</td>' +
+      amtCell +
+      '<td>' + e.currency + '</td><td><span class="tag ' + tc2 + '">' + e.payMethod +
       '</span>' + transferInfo + '</td><td>' + (ac ? ac.name : '-') +
       '</td><td><span class="edit-btn" onclick="editRecord(\'expense\',\'' + e.id + '\')">✏️</span>' +
       '<span class="del-btn" onclick="deleteRecord(\'expenses\',\'' + e.id + '\')">✕</span></td></tr>';
@@ -3659,7 +3667,7 @@ function openModal(type, editId) {
       '<div class="form-group"><label>日期</label><input type="date" id="f_date" value="' + (editing2 ? editing2.date : new Date().toISOString().slice(0, 10)) + '"></div>' +
       '<div class="form-row"><div class="form-group"><label>類別</label><select id="f_cat">' + cats2 + '</select></div>' +
       '<div class="form-group"><label>支付方式</label><select id="f_pay" onchange="toggleTransferAcct()">' + payMethods + '</select></div></div>' +
-      '<div class="form-row"><div class="form-group"><label>金額</label><input type="number" id="f_amt" step="0.01" value="' + (editing2 ? editing2.amount : '') + '"></div>' +
+      '<div class="form-row"><div class="form-group"><label>金額<span style="font-size:11px;color:var(--text3);margin-left:6px">（填負數表示折抵/回饋/退款）</span></label><input type="number" id="f_amt" step="0.01" value="' + (editing2 ? editing2.amount : '') + '"></div>' +
       '<div class="form-group"><label>幣別</label><select id="f_cur">' + curOpts2 + '</select></div></div>' +
       '<div class="form-group"><label>帳戶</label><select id="f_acct">' + acctOpts2 + '</select></div>' +
       '<div class="form-group" id="transferAcctGroup" style="display:' + (showTransferAcct ? 'block' : 'none') + '"><label>轉入帳號</label><input type="text" id="f_transferAcct" placeholder="例：012-345678901234" value="' + (editing2 ? editing2.transferAccount || '' : '') + '"></div>' +
@@ -3934,7 +3942,8 @@ function toggleTransferAcct() {
 
 function saveExpense() {
   var amt = parseFloat(document.getElementById('f_amt').value);
-  if (!amt || amt <= 0) { alert('請輸入有效金額'); return; }
+  // v1.10.3：允許負數（代表點數折抵 / 回饋 / 退款）；0 或無效值擋下
+  if (!amt) { alert('請輸入金額（可填負數表示折抵或退款）'); return; }
   var d = U(), editId = document.getElementById('f_editId').value;
   var payMethod = document.getElementById('f_pay').value;
   var transferAcctEl = document.getElementById('f_transferAcct');
@@ -5033,7 +5042,8 @@ function downloadExpenseTemplate() {
   var rows = [
     EXPENSE_XLSX_HEADERS,
     [today, '餐飲', 250, 'TWD', firstAcct.name || '', '信用卡', '午餐便當', '某便當店', '自己', ''],
-    [today, '交通', 50, 'TWD', firstAcct.name || '', '電子支付', 'MRT', '', '', '']
+    [today, '交通', 50, 'TWD', firstAcct.name || '', '電子支付', 'MRT', '', '', ''],
+    [today, '信用卡回饋', -200, 'TWD', firstAcct.name || '', '信用卡', '點數折抵（填負數代表折抵/回饋）', '', '', '']
   ];
   var ws = XLSX.utils.aoa_to_sheet(rows);
   // 欄寬
@@ -5049,7 +5059,7 @@ function downloadExpenseTemplate() {
     ['欄位', '必填', '說明'],
     ['日期', '是', 'YYYY-MM-DD，或 Excel 日期格式'],
     ['類別', '是', '若類別不存在會自動新增到你的類別清單'],
-    ['金額', '是', '數字，支援小數'],
+    ['金額', '是', '數字，支援小數；【可填負數】代表折抵/回饋/退款（例：-200）'],
     ['幣別', '否', 'TWD（預設） / USD / JPY / EUR / CNY / HKD / KRW'],
     ['帳戶', '否', '請輸入帳戶名稱，需先在資產頁建立；找不到會用第一個可用帳戶'],
     ['支付方式', '否', '信用卡 / 現金（預設） / 銀行轉帳 / 電子支付'],
@@ -5141,7 +5151,8 @@ function _parseXlsxRows(rows) {
       }
     }
     var amount = parseFloat(String(amountRaw).replace(/[,$\s]/g, '')) || 0;
-    if (!date || amount <= 0) continue;  // 必填不全跳過
+    // v1.10.3：允許負數（點數折抵/回饋）；0 或無日期才跳過
+    if (!date || amount === 0) continue;
 
     items.push({
       checked: true,
