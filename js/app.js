@@ -113,6 +113,8 @@ function defaultUserData() {
     personality: null,   // { type, score, updatedAt }
     // v1.9.9 個人資料（暱稱 + 頭像）
     profile: null,       // { nickname, avatar, avatarType:'emoji'|'image' }
+    // v1.10.2 匯入批次追蹤
+    importBatches: [],   // { id, createdAt, source:'xlsx', fileName, type:'expense', count, totalAmount, currency }
     updated_at: new Date().toISOString()
   };
 }
@@ -396,6 +398,7 @@ function U() {
   if (!DB.savingsGoals) DB.savingsGoals = [];
   if (!DB.achievements) DB.achievements = {};
   if (!DB.profile) DB.profile = { nickname: '', avatar: '🙂', avatarType: 'emoji' };
+  if (!DB.importBatches) DB.importBatches = [];
   if (!DB.updated_at) DB.updated_at = new Date().toISOString();
   if (!_legacyMigrated) {
     _legacyMigrated = true;
@@ -524,6 +527,7 @@ function enterApp() {
   document.getElementById('app').style.display = 'block';
   renderSidebarUser();
   renderSettingsProfile();
+  renderImportBatchList();
   var se = document.getElementById('settingsEmail');
   if (se) se.textContent = currentUser;
   initMonthSelectors();
@@ -1136,8 +1140,12 @@ function renderExpense() {
     '<div class="stat-card"><div class="label">信用卡</div><div class="value c-orange">' + fmt(cc, 'TWD') + '</div></div>' +
     '<div class="stat-card"><div class="label">現金</div><div class="value c-pink">' + fmt(cash, 'TWD') + '</div></div>';
 
+  // 全選 checkbox 狀態：看當前過濾後的 list 是否都被選取
+  var allChecked = list.length > 0 && list.every(function(e) { return _selectedExpenses.has(e.id); });
+
   document.getElementById('expThead').innerHTML =
     '<tr>' +
+    '<th style="width:36px"><input type="checkbox" class="row-check" ' + (allChecked ? 'checked' : '') + ' onclick="toggleAllExpenses(this)" title="全選本頁"></th>' +
     '<th class="sortable" onclick="toggleSort(\'expense\',\'date\')">日期' + _sortIndicator('expense','date') + '</th>' +
     '<th class="sortable" style="min-width:80px" onclick="toggleSort(\'expense\',\'category\')">類別' + _sortIndicator('expense','category') + '</th>' +
     '<th class="sortable" style="min-width:160px" onclick="toggleSort(\'expense\',\'note\')">說明' + _sortIndicator('expense','note') + '</th>' +
@@ -1153,7 +1161,10 @@ function renderExpense() {
     var tc2 = e.payMethod === '信用卡' ? 'tag-orange' : e.payMethod === '現金' ? 'tag-purple' : 'tag-blue';
     var transferInfo = e.payMethod === '銀行轉帳' && e.transferAccount ? '<br><small style="color:var(--text3)">轉入：' + e.transferAccount + '</small>' : '';
     var mainCat2 = (e.category || '').split(' > ')[0];
-    return '<tr><td>' + e.date + '</td><td><span class="tag tag-red"><span class="cat-icon">' +
+    var isSel = _selectedExpenses.has(e.id);
+    return '<tr' + (isSel ? ' class="row-selected"' : '') + '>' +
+      '<td><input type="checkbox" class="row-check" data-eid="' + e.id + '" ' + (isSel ? 'checked' : '') + ' onclick="toggleExpenseSelect(\'' + e.id + '\',this)"></td>' +
+      '<td>' + e.date + '</td><td><span class="tag tag-red"><span class="cat-icon">' +
       getIcon(mainCat2) + '</span>' + _getCatDisplay(e.category) + '</span></td><td>' + (e.note || '-') +
       '</td><td>' + (e.payTo || '-') + '</td><td>' + (e.usedBy || '-') +
       '</td><td class="c-red" style="font-weight:600">\u2212' + fmt(e.amount, e.currency) +
@@ -1161,7 +1172,79 @@ function renderExpense() {
       '</span>' + transferInfo + '</td><td>' + (ac ? ac.name : '-') +
       '</td><td><span class="edit-btn" onclick="editRecord(\'expense\',\'' + e.id + '\')">✏️</span>' +
       '<span class="del-btn" onclick="deleteRecord(\'expenses\',\'' + e.id + '\')">✕</span></td></tr>';
-  }).join('') : '<tr><td colspan="10" style="text-align:center;color:var(--text3);padding:40px">尚無支出記錄</td></tr>';
+  }).join('') : '<tr><td colspan="11" style="text-align:center;color:var(--text3);padding:40px">尚無支出記錄</td></tr>';
+
+  _updateBulkBar();
+}
+
+// ============ 支出批量選取/刪除（v1.10.2） ============
+var _selectedExpenses = new Set();
+
+function toggleExpenseSelect(id, checkbox) {
+  if (checkbox && checkbox.checked) _selectedExpenses.add(id);
+  else _selectedExpenses.delete(id);
+  var tr = checkbox ? checkbox.closest('tr') : null;
+  if (tr) tr.classList.toggle('row-selected', checkbox.checked);
+  _updateBulkBar();
+}
+
+function toggleAllExpenses(headerCheckbox) {
+  var d = U();
+  var range = document.getElementById('expRange').value;
+  var month = document.getElementById('expMonth').value;
+  var year = document.getElementById('expYear').value;
+  var pt = document.getElementById('expPayType').value;
+  var list = filterByRange(d.expenses, range, month, year);
+  if (pt !== 'all') list = list.filter(function(e) { return e.payMethod === pt; });
+
+  if (headerCheckbox.checked) {
+    list.forEach(function(e) { _selectedExpenses.add(e.id); });
+  } else {
+    list.forEach(function(e) { _selectedExpenses.delete(e.id); });
+  }
+  renderExpense();
+}
+
+function clearExpenseSelection() {
+  _selectedExpenses.clear();
+  renderExpense();
+}
+
+function _updateBulkBar() {
+  var bar = document.getElementById('expBulkBar');
+  var cnt = document.getElementById('expBulkCount');
+  if (!bar) return;
+  var n = _selectedExpenses.size;
+  bar.style.display = n > 0 ? 'flex' : 'none';
+  if (cnt) cnt.textContent = n;
+}
+
+function bulkDeleteExpenses() {
+  var count = _selectedExpenses.size;
+  if (count === 0) return;
+  var d = U();
+  // 預先計算將受影響的金額與帳戶
+  var totalTWD = 0;
+  d.expenses.forEach(function(e) {
+    if (_selectedExpenses.has(e.id)) totalTWD += convert(e.amount, e.currency, 'TWD');
+  });
+  showConfirmModal(
+    '確定刪除選取的 ' + count + ' 筆支出？總額 ' + fmt(totalTWD, 'TWD') + '。<br>' +
+    '刪除後會同步還原對應帳戶餘額，此動作無法復原。',
+    function() {
+      d.expenses.forEach(function(e) {
+        if (_selectedExpenses.has(e.id)) {
+          var ac = d.accounts.find(function(a) { return a.id === e.accountId; });
+          if (ac) ac.balance += convert(e.amount, e.currency, ac.currency);
+        }
+      });
+      d.expenses = d.expenses.filter(function(e) { return !_selectedExpenses.has(e.id); });
+      _selectedExpenses.clear();
+      save();
+      renderExpense();
+      showToast('已刪除 ' + count + ' 筆支出並還原帳戶', 'success');
+    }
+  );
 }
 
 // ============ 資產管理 ============
@@ -4921,6 +5004,7 @@ function saveBillExpenses() {
 
 // ============ Excel 批量匯入支出（v1.10.1） ============
 var _xlsxItems = [];
+var _xlsxFileName = '';
 var EXPENSE_XLSX_HEADERS = ['日期', '類別', '金額', '幣別', '帳戶', '支付方式', '說明', '支付對象', '使用對象', '專案'];
 
 function openXlsxImport() {
@@ -4986,6 +5070,7 @@ function handleXlsxUpload(event) {
   var file = event.target.files[0];
   if (!file) return;
   if (typeof XLSX === 'undefined') { showToast('SheetJS 尚未載入', 'warn'); return; }
+  _xlsxFileName = file.name || '';
   var reader = new FileReader();
   reader.onload = function(e) {
     try {
@@ -5133,6 +5218,7 @@ function saveXlsxImport() {
 
   var count = 0;
   var newCatsAdded = 0;
+  var totalAmountTWD = 0;
 
   // 建立帳戶名稱 → id 映射
   var acctByName = {};
@@ -5141,6 +5227,20 @@ function saveXlsxImport() {
   var projByName = {};
   (d.projects || []).forEach(function(p) { projByName[p.name] = p.id; });
   var fallbackAcct = d.accounts.find(function(a) { return a.type === 'bank' || a.type === 'cash'; }) || d.accounts[0];
+
+  // v1.10.2：建立 batch 記錄，之後可整批刪除
+  if (!d.importBatches) d.importBatches = [];
+  var batchId = genId();
+  var batch = {
+    id: batchId,
+    createdAt: new Date().toISOString(),
+    source: 'xlsx',
+    fileName: _xlsxFileName || '未命名.xlsx',
+    type: 'expense',
+    count: 0,
+    totalAmount: 0,
+    currency: 'TWD'
+  };
 
   checked.forEach(function(item) {
     // 自動新增類別
@@ -5165,20 +5265,81 @@ function saveXlsxImport() {
       usedBy: item.usedBy,
       transferAccount: '',
       projectId: projectId,
+      batchId: batchId,
       _fromXlsxImport: true
     };
     d.expenses.push(record);
     // 扣除帳戶餘額
     if (acct) acct.balance -= convert(item.amount, item.currency, acct.currency);
+    totalAmountTWD += convert(item.amount, item.currency, 'TWD');
     count++;
   });
+
+  batch.count = count;
+  batch.totalAmount = totalAmountTWD;
+  d.importBatches.unshift(batch);  // 新的放前面
 
   save();
   closeXlsxImport();
   renderExpense();
+  if (document.getElementById('importBatchList')) renderImportBatchList();
   var msg = '✅ 已匯入 ' + count + ' 筆支出';
   if (newCatsAdded > 0) msg += '（自動新增 ' + newCatsAdded + ' 個類別）';
   showToast(msg, 'success');
+}
+
+/** 設定頁「匯入記錄」區塊渲染 */
+function renderImportBatchList() {
+  var el = document.getElementById('importBatchList');
+  if (!el) return;
+  var d = U();
+  var batches = d.importBatches || [];
+  if (batches.length === 0) {
+    el.innerHTML = '<p style="color:var(--text3);font-size:13px;text-align:center;padding:24px 0">尚無批量匯入紀錄</p>';
+    return;
+  }
+  el.innerHTML = batches.map(function(b) {
+    var t = new Date(b.createdAt);
+    var timeStr = t.getFullYear() + '-' + String(t.getMonth()+1).padStart(2,'0') + '-' + String(t.getDate()).padStart(2,'0') +
+      ' ' + String(t.getHours()).padStart(2,'0') + ':' + String(t.getMinutes()).padStart(2,'0');
+    return '<div style="display:flex;align-items:center;gap:12px;padding:12px;border:1px solid var(--border);border-radius:10px;margin-bottom:8px;background:var(--card)">' +
+      '<div style="flex:1;min-width:0">' +
+        '<div style="font-size:14px;font-weight:600;color:var(--text);word-break:break-all">📄 ' + (b.fileName || '未命名') + '</div>' +
+        '<div style="font-size:12px;color:var(--text3);margin-top:4px">' +
+          '⏱ ' + timeStr + '｜' + b.count + ' 筆｜' +
+          '<span class="c-red">' + fmt(b.totalAmount, b.currency || 'TWD') + '</span>' +
+        '</div>' +
+      '</div>' +
+      '<button class="btn btn-s btn-sm" style="color:var(--red)" onclick="deleteImportBatch(\'' + b.id + '\')" title="刪除整批">🗑 刪除此批</button>' +
+    '</div>';
+  }).join('');
+}
+
+/** 刪除整批：反向移除所有 batchId 的支出並還原帳戶餘額 */
+function deleteImportBatch(batchId) {
+  var d = U();
+  var batch = (d.importBatches || []).find(function(b) { return b.id === batchId; });
+  if (!batch) return;
+  var affected = (d.expenses || []).filter(function(e) { return e.batchId === batchId; });
+  showConfirmModal(
+    '確定刪除此批匯入？共 ' + affected.length + ' 筆、' + fmt(batch.totalAmount, batch.currency || 'TWD') + '。<br>' +
+    '刪除後會同步還原對應帳戶餘額，此動作無法復原。',
+    function() {
+      // 還原帳戶餘額
+      affected.forEach(function(e) {
+        var acct = d.accounts.find(function(a) { return a.id === e.accountId; });
+        if (acct) acct.balance += convert(e.amount, e.currency, acct.currency);
+      });
+      // 移除 expenses
+      d.expenses = d.expenses.filter(function(e) { return e.batchId !== batchId; });
+      // 移除 batch 記錄
+      d.importBatches = d.importBatches.filter(function(b) { return b.id !== batchId; });
+      save();
+      renderImportBatchList();
+      if (document.querySelector('#page-expense.active')) renderExpense();
+      showToast('已刪除 ' + affected.length + ' 筆匯入資料並還原帳戶', 'success');
+    }
+  );
 }
 
 /** 顯示確認彈窗（取代 confirm） */

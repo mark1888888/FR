@@ -307,6 +307,13 @@
         <button class="btn btn-s" onclick="openBillScanner()">📷 掃描帳單</button>
         <button class="btn btn-s" onclick="openXlsxImport()">📊 批量匯入</button>
       </div>
+      <!-- 批量刪除工具列（選取時才顯示） -->
+      <div id="expBulkBar" class="bulk-action-bar" style="display:none">
+        <span>已選取 <strong id="expBulkCount">0</strong> 筆</span>
+        <div style="flex:1"></div>
+        <button class="btn btn-s btn-sm" onclick="clearExpenseSelection()">取消選取</button>
+        <button class="btn btn-s btn-sm" style="color:var(--red);border-color:rgba(239,68,68,.4)" onclick="bulkDeleteExpenses()">🗑 批量刪除</button>
+      </div>
       <div class="stat-grid" id="expStats"></div>
       <div class="table-wrap">
         <div class="table-header"><h3>支出列表</h3></div>
@@ -590,6 +597,11 @@
           <button class="btn btn-s" onclick="document.getElementById('importFile').click()">匯入 JSON</button>
           <input type="file" id="importFile" accept=".json" style="display:none" onchange="importData(event)">
         </div>
+      </div>
+      <div class="chart-container" style="margin-top:20px">
+        <h3>📥 批量匯入記錄</h3>
+        <p style="color:var(--text2);font-size:13px;margin-bottom:12px">每次 Excel 匯入都會記錄於此，若不小心匯錯可整批刪除（自動還原帳戶餘額）</p>
+        <div id="importBatchList"></div>
       </div>
       <div class="chart-container" style="margin-top:20px">
         <h3>更改密碼</h3>

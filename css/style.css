@@ -973,6 +973,27 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   .more-menu-item svg{width:20px;height:20px}
 }
 
+/* ============ 批量選取工具列 ============ */
+.bulk-action-bar{
+  display:flex;align-items:center;gap:10px;
+  padding:12px 16px;margin-bottom:16px;
+  background:linear-gradient(135deg,rgba(108,99,255,.12),rgba(108,99,255,.06));
+  border:1px solid rgba(108,99,255,.35);
+  border-radius:12px;
+  box-shadow:var(--shadow-sm);
+  animation:slideDown .25s var(--ease-out);
+  font-size:13px;color:var(--text);
+}
+.bulk-action-bar strong{color:var(--primary-light);font-size:16px;margin:0 4px}
+@keyframes slideDown{
+  from{opacity:0;transform:translateY(-8px)}
+  to{opacity:1;transform:translateY(0)}
+}
+
+/* 行內 checkbox（表格用） */
+.row-check{cursor:pointer;vertical-align:middle}
+tr.row-selected td{background:rgba(108,99,255,.08)}
+
 /* ============ 勳章卡呼吸光暈（v1.9.3） ============ */
 @keyframes medalGlow{
   0%,100%{box-shadow:0 0 0 0 rgba(251,191,36,.5),0 8px 24px rgba(251,191,36,.3)}
