@@ -1,5 +1,39 @@
 # RichMark 更新記錄（前身為 FlowRich）
 
+## v1.10.4 — 2026-04-17 · 觸控修正 + 數字動畫 + 股價快取
+
+### 修正 — 手機觸控 hover 卡住
+- 所有 hover lift 效果（卡片上浮、按鈕光暈、nav 縮排、icon 放大）在**觸控裝置**會「黏住」，因為觸控後 `:hover` 不會自動清除
+- 解法：在 CSS 尾端加 `@media (hover: none) { ... }` 將所有 transform / box-shadow / border-color 增量**回復為預設值**
+- 滑鼠使用者（`hover: hover`）完整體驗保留；觸控使用者乾淨利落，按完就釋放
+- `:active` 的短暫縮放回饋保留（觸控也會觸發）
+
+### 新功能 — 數字動畫
+- 資產總覽卡片的金額在**首次登入**與**切換回 dashboard**時會從 0 跳動到目標值
+- 用 `requestAnimationFrame` + easeOutCubic 曲線，900ms 完成
+- 自動保留原有格式：千位逗號、幣別前綴、正負符號、小數位
+- 卡片間 stagger 80ms 錯開，像依序點亮
+- 尊重 `prefers-reduced-motion`（使用者系統設定關閉動畫 → 跳過不跑）
+- 同頁 re-render（例如新增一筆支出）不會重播動畫
+
+### 改善 — 投資市值快取
+**問題**：登入後第一眼看到的「投資」金額是**成本價**，要等股價 fetch 完才跳到市值，體驗不連貫。而且就算非開盤時段也會發不必要的 API 請求。
+
+**修法**：
+- 新增 `DB.lastPortfolioPrices` 作為**持久化快取**，每次成功 fetch 後寫入並同步雲端
+- `portfolioMarketValue()` 優先順序：**本次 session 即時價 → DB 快取 → 成本價 fallback**
+- 登入時立即顯示上次儲存的市值（通常就是合理數字）
+- 只在**開盤時段**（週一～五 09:00–13:30）才 fetch 新價格
+- 非開盤時間不打 API，純看快取
+- 投資組合明細表格的「現價」與「市值」欄位也套用快取邏輯
+
+### 技術細節
+- `_animateNumberText(el, opts)` — 通用數字動畫工具，可套到其他卡
+- 手機觸控偵測：`@media (hover: none) and (pointer: coarse)` — 精確地針對「純觸控」裝置
+- 股價快取同步時機：在 `fetchPortfolioPrices()` 成功後 `save()`（會上傳 Supabase）
+
+---
+
 ## v1.10.3 — 2026-04-17 · 支出允許負數（點數折抵/回饋/退款）
 
 ### 新功能

@@ -1006,6 +1006,35 @@ tr.row-selected td{background:rgba(108,99,255,.08)}
 /* ============ 進度條動畫 ============ */
 .chart-bar-fill{transition:width .8s var(--ease-out)}
 
+/* ============ 觸控裝置：停用 hover 浮起效果避免「卡住」（v1.10.4） ============ */
+/* 只有真的能 hover 的裝置（滑鼠）才有 lift 動態。觸控裝置按完就釋放，不留殘影。 */
+@media(hover:none){
+  .stat-card:hover,
+  .news-card:hover,
+  .stock-card:hover,
+  .chart-container:hover,
+  .table-wrap:hover,
+  .btn-p:hover,
+  .btn-s:hover,
+  .btn-danger:hover,
+  .user-card:hover{
+    transform:none!important;
+  }
+  .stat-card:hover{box-shadow:var(--shadow-sm),var(--shadow-inset)!important;border-color:var(--border)!important}
+  .stat-card:hover::before{opacity:0!important}
+  .news-card:hover{box-shadow:var(--shadow-sm)!important;border-color:var(--border)!important}
+  .stock-card:hover{box-shadow:var(--shadow-sm)!important;border-color:var(--border)!important}
+  .chart-container:hover{box-shadow:var(--shadow-sm)!important}
+  .table-wrap:hover{box-shadow:var(--shadow-sm)!important}
+  .btn-p:hover{box-shadow:0 4px 14px rgba(108,99,255,.35),inset 0 1px 0 rgba(255,255,255,.15)!important;filter:none!important}
+  .btn-s:hover{box-shadow:var(--shadow-sm)!important;border-color:var(--border)!important;color:var(--text2)!important}
+  .btn-danger:hover{box-shadow:none!important;background:rgba(239,68,68,.15)!important}
+  .nav-item:hover{padding-left:20px!important;background:initial!important;color:var(--text2)!important}
+  .nav-item:hover svg{transform:none!important}
+  .user-card:hover{border-color:var(--border)!important;background:var(--card)!important}
+  .avatar-emoji-opt:hover{transform:none!important}
+}
+
 /* ============ 尊重使用者 prefers-reduced-motion ============ */
 @media(prefers-reduced-motion:reduce){
   *,*::before,*::after{

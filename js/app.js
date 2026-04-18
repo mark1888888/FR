@@ -399,6 +399,7 @@ function U() {
   if (!DB.achievements) DB.achievements = {};
   if (!DB.profile) DB.profile = { nickname: '', avatar: '🙂', avatarType: 'emoji' };
   if (!DB.importBatches) DB.importBatches = [];
+  if (!DB.lastPortfolioPrices) DB.lastPortfolioPrices = {};
   if (!DB.updated_at) DB.updated_at = new Date().toISOString();
   if (!_legacyMigrated) {
     _legacyMigrated = true;
@@ -533,6 +534,8 @@ function enterApp() {
   initMonthSelectors();
   fetchRates();
   renderDashboard();
+  // v1.10.4：登入後數字跳動歡迎動畫
+  setTimeout(_runDashboardNumberAnimation, 150);
   loadCategories();
   startPeriodicSync();
   startSessionCheck(); // 啟動單一裝置檢查
@@ -814,6 +817,9 @@ function switchFromMore(page) {
 
 // ============ 頁面切換（含底部導航同步） ============
 function switchPage(page) {
+  // 記住之前的頁面，用來判斷是否該觸發歡迎動畫
+  var prevActive = document.querySelector('.page.active');
+  var prevPageId = prevActive ? prevActive.id : '';
   document.querySelectorAll('.page').forEach(function(p) { p.classList.remove('active'); });
   document.getElementById('page-' + page).classList.add('active');
   // 同步側邊欄
@@ -836,6 +842,54 @@ function switchPage(page) {
     growth: renderGrowth
   };
   if (renders[page]) renders[page]();
+  // v1.10.4：從其他頁切到 dashboard 時觸發數字跳動歡迎動畫
+  if (page === 'dashboard' && prevPageId !== 'page-dashboard') {
+    setTimeout(_runDashboardNumberAnimation, 80);
+  }
+}
+
+// ============ 數字動畫工具 (v1.10.4) ============
+/** 把元素內的數字文字從 0 動畫到原本值；保留符號、幣別前綴、逗號格式。 */
+function _animateNumberText(el, opts) {
+  opts = opts || {};
+  var duration = opts.duration || 900;
+  var original = el.getAttribute('data-final-text') || el.textContent;
+  el.setAttribute('data-final-text', original);
+  // 找出第一個數字序列（可能含負號、小數點、千位逗號）
+  var match = original.match(/([-−]?[\d,]+\.?\d*)/);
+  if (!match) return;
+  var numStr = match[1].replace(/,/g, '').replace(/−/g, '-');
+  var target = parseFloat(numStr);
+  if (!isFinite(target) || Math.abs(target) < 0.01) return;  // 0 或極小值不動
+  var prefix = original.slice(0, match.index);
+  var suffix = original.slice(match.index + match[1].length);
+  var isInt = !numStr.includes('.');
+  var decimals = isInt ? 0 : (numStr.split('.')[1] || '').length;
+  var start = performance.now();
+  function fmtNum(n) {
+    return n.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+  }
+  function frame(now) {
+    var t = Math.min(1, (now - start) / duration);
+    var eased = 1 - Math.pow(1 - t, 3);  // easeOutCubic
+    var current = target * eased;
+    el.textContent = prefix + fmtNum(current) + suffix;
+    if (t < 1) requestAnimationFrame(frame);
+    else el.textContent = original;  // 確保最終精確值
+  }
+  requestAnimationFrame(frame);
+}
+
+/** 掃描 dashboard 的 .stat-card .value 執行一次數字動畫 */
+function _runDashboardNumberAnimation() {
+  // reduced-motion 尊重使用者設定
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  var nodes = document.querySelectorAll('#page-dashboard .stat-card .value');
+  var stagger = 0;
+  nodes.forEach(function(el) {
+    setTimeout(function() { _animateNumberText(el, { duration: 900 }); }, stagger);
+    stagger += 80;
+  });
 }
 
 // ============ 總覽 (Dashboard) ============
@@ -2423,20 +2477,34 @@ async function fetchPortfolioPrices() {
     var otcQ = stockCodes.map(function(c) { return 'otc_' + c + '.tw'; }).join('|');
     var data = await fetchTWSE(tseQ + '|' + otcQ);
     if (data && data.msgArray) {
+      var updated = false;
       data.msgArray.forEach(function(s) {
         var price = parseFloat(s.z) || parseFloat(s.y) || 0;
-        if (price > 0) _portfolioPrices[s.c] = price;
+        if (price > 0) { _portfolioPrices[s.c] = price; updated = true; }
       });
+      // v1.10.4：抓到後同步寫回 DB.lastPortfolioPrices 當 persistent cache
+      if (updated) {
+        if (!d.lastPortfolioPrices) d.lastPortfolioPrices = {};
+        Object.keys(_portfolioPrices).forEach(function(code) {
+          d.lastPortfolioPrices[code] = _portfolioPrices[code];
+        });
+        d.lastPortfolioPrices._updatedAt = new Date().toISOString();
+        save();
+      }
     }
   } catch (e) { /* 靜默 */ }
 }
 
-/** 計算投資組合總市值（換算到指定幣別）。若無即時股價則以成本為 fallback。 */
+/** 計算投資組合總市值（換算到指定幣別）。
+ *  v1.10.4：優先順序：本次 session 即時價 → DB 快取上次市值 → 成本價
+ *  這樣登入時立即看到上次儲存的市值，而非成本；只有開盤才會刷新。
+ */
 function portfolioMarketValue(targetCurrency) {
   if (!DB || !DB.portfolio) return 0;
+  var cache = (DB.lastPortfolioPrices || {});
   return DB.portfolio.reduce(function(s, p) {
     var cost = (p.costPerUnit || 0) * (p.units || 0);
-    var price = _portfolioPrices[p.code] || 0;
+    var price = _portfolioPrices[p.code] || cache[p.code] || 0;
     var mv = price > 0 ? price * (p.units || 0) : cost;
     return s + convert(mv, p.currency || 'TWD', targetCurrency);
   }, 0);
@@ -2455,9 +2523,11 @@ async function renderPortfolio() {
   var totalCost = 0, totalValue = 0;
   var typeLabels = { stock: '股票', fund: '基金', other: '其他' };
 
+  var priceCache = (d.lastPortfolioPrices || {});
   tb.innerHTML = d.portfolio.length ? d.portfolio.map(function(p) {
     var cost = (p.costPerUnit || 0) * (p.units || 0);
-    var currentPrice = _portfolioPrices[p.code] || 0;
+    // v1.10.4：本次 session 即時價 → DB 快取 → 成本 fallback
+    var currentPrice = _portfolioPrices[p.code] || priceCache[p.code] || 0;
     var marketVal = currentPrice > 0 ? currentPrice * (p.units || 0) : cost;
     var pnl = marketVal - cost;
     var pnlPct = cost > 0 ? ((pnl / cost) * 100) : 0;
@@ -4411,10 +4481,13 @@ function resetBillScanner() {
 document.addEventListener('DOMContentLoaded', function() {
   // 啟動股票開盤自動刷新（每分鐘 tick，實際刷新節奏 10 分鐘 + 需在投資頁 + 開盤中）
   startStockAutoRefresh();
-  // 啟動時背景載入投資組合股價，讓資產總覽的「流動資產」數字開即正確
+  // v1.10.4：啟動時優先使用 DB 快取（上次儲存的市值）顯示，只在開盤時段才背景刷新
   setTimeout(function() {
     if (!DB || !DB.portfolio || DB.portfolio.length === 0) return;
-    fetchPortfolioPrices().then(function() { rerenderActivePage(); });
+    if (isTwStockMarketOpen()) {
+      fetchPortfolioPrices().then(function() { rerenderActivePage(); });
+    }
+    // 非開盤時間：不發請求，直接用 DB.lastPortfolioPrices 的快取值顯示
   }, 500);
 
   var uploadArea = document.getElementById('billUploadArea');
