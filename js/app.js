@@ -1197,10 +1197,36 @@ function renderExpense() {
   var cash = list.filter(function(e) { return e.payMethod === '現金'; })
     .reduce(function(s, e) { return s + convert(e.amount, e.currency, 'TWD'); }, 0);
 
+  // v1.10.7：信用卡/現金按「帳戶」細分的副標
+  function _breakdownByAccount(payMethod) {
+    var m = {};
+    list.filter(function(e) { return e.payMethod === payMethod && e.accountId; })
+      .forEach(function(e) {
+        m[e.accountId] = (m[e.accountId] || 0) + convert(e.amount, e.currency, 'TWD');
+      });
+    return Object.keys(m).map(function(aid) {
+      var a = d.accounts.find(function(x) { return x.id === aid; });
+      return { name: a ? a.name : '(未指定)', amount: m[aid] };
+    }).sort(function(a, b) { return b.amount - a.amount; });
+  }
+  function _renderBreakdownSub(arr, emptyText) {
+    if (arr.length === 0) return '<div class="sub" style="color:var(--text3)">' + emptyText + '</div>';
+    return arr.map(function(x) {
+      return '<div class="sub" style="font-size:11px;line-height:1.5;display:flex;justify-content:space-between;gap:8px">' +
+        '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + x.name + '</span>' +
+        '<span style="font-weight:600;color:var(--text2)">' + fmt(x.amount, 'TWD') + '</span>' +
+        '</div>';
+    }).join('');
+  }
+  var ccBreakdown = _breakdownByAccount('信用卡');
+  var cashBreakdown = _breakdownByAccount('現金');
+
   document.getElementById('expStats').innerHTML =
     '<div class="stat-card"><div class="label">總支出 (TWD)</div><div class="value c-red">' + fmt(total, 'TWD') + '</div><div class="sub">' + list.length + ' 筆</div></div>' +
-    '<div class="stat-card"><div class="label">信用卡</div><div class="value c-orange">' + fmt(cc, 'TWD') + '</div></div>' +
-    '<div class="stat-card"><div class="label">現金</div><div class="value c-pink">' + fmt(cash, 'TWD') + '</div></div>';
+    '<div class="stat-card"><div class="label">信用卡</div><div class="value c-orange">' + fmt(cc, 'TWD') + '</div>' +
+      _renderBreakdownSub(ccBreakdown, '此期間無信用卡支出') + '</div>' +
+    '<div class="stat-card"><div class="label">現金</div><div class="value c-pink">' + fmt(cash, 'TWD') + '</div>' +
+      _renderBreakdownSub(cashBreakdown, '此期間無現金支出') + '</div>';
 
   // 全選 checkbox 狀態：看當前過濾後的 list 是否都被選取
   var allChecked = list.length > 0 && list.every(function(e) { return _selectedExpenses.has(e.id); });
