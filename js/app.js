@@ -567,17 +567,32 @@ function renderAvatarHtml(profile, cls) {
   return '<div class="' + cls + '">' + emoji + '</div>';
 }
 
-/** 側欄使用者區渲染 */
+/** 側欄使用者區 + 手機頂部列同步渲染 */
 function renderSidebarUser() {
-  var el = document.getElementById('sidebarUser');
-  if (!el) return;
   var p = getProfile();
   var nick = p.nickname || (currentUser ? currentUser.split('@')[0] : '使用者');
-  el.innerHTML = renderAvatarHtml(p) +
-    '<div class="user-meta">' +
-      '<div class="user-nick">' + nick + '</div>' +
-      '<div class="user-email">' + (currentUser || '') + '</div>' +
-    '</div>';
+  // 桌面側欄
+  var el = document.getElementById('sidebarUser');
+  if (el) {
+    el.innerHTML = renderAvatarHtml(p) +
+      '<div class="user-meta">' +
+        '<div class="user-nick">' + nick + '</div>' +
+        '<div class="user-email">' + (currentUser || '') + '</div>' +
+      '</div>';
+  }
+  // 手機頂部列
+  var avatarEl = document.getElementById('mobileTopbarAvatar');
+  var nickEl = document.getElementById('mobileTopbarNick');
+  var emailEl = document.getElementById('mobileTopbarEmail');
+  if (avatarEl) {
+    if (p.avatarType === 'image' && p.avatar) {
+      avatarEl.innerHTML = '<img src="' + p.avatar + '" alt="avatar">';
+    } else {
+      avatarEl.textContent = p.avatar || '🙂';
+    }
+  }
+  if (nickEl) nickEl.textContent = nick;
+  if (emailEl) emailEl.textContent = currentUser || '';
 }
 
 /** 打開個人資料編輯 Modal */
