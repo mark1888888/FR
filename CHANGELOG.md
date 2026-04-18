@@ -1,5 +1,71 @@
 # RichMark 更新記錄（前身為 FlowRich）
 
+## v1.10.1 — 2026-04-17 · Excel 批量匯入支出
+
+### 新功能
+- **支出頁新增「📊 批量匯入」按鈕**（在「+ 新增支出」「掃描帳單」之後）
+- **下載制式化 Excel 範本**：
+  - 10 欄固定格式：日期 / 類別 / 金額 / 幣別 / 帳戶 / 支付方式 / 說明 / 支付對象 / 使用對象 / 專案
+  - 含 1 筆範例列，使用者複製貼上快速填寫
+  - 附第二個工作表「欄位說明」詳述每欄用法
+  - 檔名帶日期：`RichMark_支出匯入範本_2026-04-17.xlsx`
+- **上傳 Excel / CSV 解析**：
+  - 支援 `.xlsx` `.xls` `.csv` 三種格式
+  - 自動偵測表頭列位置（容忍前幾列有空白）
+  - 自動處理 Excel 日期格式、`YYYY/MM/DD`、`YYYY-MM-DD` 三種
+  - 金額自動去除 `$` `,` 符號後轉數字
+- **預覽模式**：
+  - 每筆可個別勾選/取消要匯入
+  - 顯示列號、日期、類別、金額、支付方式、帳戶配對狀態
+  - 帳戶匹配視覺標示：✓ 已配對 / 未指定 / 未找到
+  - 完整說明/對象/專案標籤一覽
+- **批次寫入**：
+  - 未存在的類別自動新增到 `expenseCategories`
+  - 帳戶名稱匹配失敗時 fallback 到第一個銀行/現金帳戶
+  - 專案名稱匹配失敗則忽略（不產生錯誤）
+  - 自動調整對應帳戶餘額
+  - 顯示「✅ 已匯入 N 筆，自動新增 M 個類別」
+
+### 依賴
+- 引入 SheetJS (`xlsx@0.18.5`) via CDN
+- 檔案大小約 940KB（已在 service-worker `NEVER_CACHE_HOSTS` 裡避免過度快取）
+
+---
+
+## v1.10.0 — 2026-04-17 · PWA + APK 打包支援
+
+### 升級為合格 PWA
+- 新增 `manifest.json`：app 名稱、主題色、主畫面圖示、三個應用捷徑（新增支出/收入/總覽）
+- 新增 `service-worker.js`：
+  - 靜態資源 Cache-First（HTML/CSS/JS/圖片）
+  - 第三方 API（Supabase、TWSE、CoinGecko、metals.dev 等）Network-Only
+  - 導覽請求 Network-First，斷網自動回退首頁
+  - 版本化快取（`richmark-v1.9.9`），改版本即觸發更新
+- `index.html` 掛入 PWA 相關 meta：
+  - `theme-color`、`apple-mobile-web-app-capable`、`apple-mobile-web-app-title`
+  - `application-name`、`msapplication-TileColor`
+  - 自動註冊 service worker（監聽 updatefound）
+
+### APK 建置支援（3 條路徑）
+提供完整建置配置 + 教學：
+- `manifest.json` — PWA 宣告
+- `service-worker.js` — 離線支援
+- `twa-manifest.json` — Bubblewrap TWA 配置（Chrome 官方推薦）
+- `capacitor.config.json` — Capacitor 配置（需要原生功能時用）
+- `package.json` — 建置腳本 + devDependencies
+- **`BUILD_APK.md`** — 三種打包方式詳細教學：
+  1. 🟢 **PWABuilder**（零代碼、線上生成 APK，3 分鐘）
+  2. 🟡 **Bubblewrap TWA**（Chrome 官方、小 APK ~2MB）
+  3. 🟠 **Capacitor**（需 Android Studio、支援原生功能）
+- 含 Digital Asset Links、keystore 簽章、Play 商店上架步驟
+
+### 相容性注意
+- PWA 功能只在 HTTPS 或 localhost 生效（本機 `file://` 無法註冊 SW）
+- Service Worker 版本升級時，舊快取會自動清除
+- iOS 加到主畫面後以 standalone 模式顯示，沒有 URL bar
+
+---
+
 ## v1.9.9 — 2026-04-17 · 個人資料（暱稱 + 頭像）
 
 ### 新功能

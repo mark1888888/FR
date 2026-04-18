@@ -4,12 +4,44 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>RichMark 記帳理財</title>
+<meta name="description" content="RichMark — 個人記帳理財 × 投資追蹤 × 財務 RPG">
+<meta name="theme-color" content="#6c63ff">
+<meta name="color-scheme" content="dark light">
+<!-- PWA manifest -->
+<link rel="manifest" href="manifest.json">
+<!-- iOS 加入主畫面支援 -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="RichMark">
+<!-- 桌面相關 -->
+<meta name="application-name" content="RichMark">
+<meta name="msapplication-TileColor" content="#6c63ff">
 <link rel="stylesheet" href="css/style.css">
 <link rel="icon" type="image/x-icon" href="images/favicon.ico">
 <link rel="icon" type="image/png" sizes="32x32" href="images/favicon-32x32.png">
 <link rel="apple-touch-icon" sizes="180x180" href="images/apple-touch-icon.png">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script>
+  // 註冊 Service Worker（PWA 離線支援 + APK 打包前提）
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function() {
+      navigator.serviceWorker.register('service-worker.js').then(function(reg) {
+        // 若有更新，background fetch 完後提示用戶刷新
+        reg.addEventListener('updatefound', function() {
+          var nw = reg.installing;
+          if (!nw) return;
+          nw.addEventListener('statechange', function() {
+            if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+              console.log('[PWA] 有新版本，請重新整理套用');
+            }
+          });
+        });
+      }).catch(function(e) { console.warn('[PWA] Service Worker 註冊失敗:', e); });
+    });
+  }
+</script>
 </head>
 <body>
 
@@ -273,6 +305,7 @@
         </select>
         <button class="btn btn-p" onclick="openModal('expense')">+ 新增支出</button>
         <button class="btn btn-s" onclick="openBillScanner()">📷 掃描帳單</button>
+        <button class="btn btn-s" onclick="openXlsxImport()">📊 批量匯入</button>
       </div>
       <div class="stat-grid" id="expStats"></div>
       <div class="table-wrap">
@@ -725,6 +758,52 @@
     </div>
     <div id="billInitActions" class="modal-actions">
       <button class="btn btn-s" onclick="closeBillScanner()">取消</button>
+    </div>
+  </div>
+</div>
+
+<!-- Excel 批量匯入 Modal -->
+<div class="modal-overlay" id="xlsxImportOverlay" onclick="if(event.target===this)closeXlsxImport()">
+  <div class="modal" style="max-width:760px">
+    <h3>📊 批量匯入支出</h3>
+    <div id="xlsxIntroArea">
+      <div style="background:rgba(108,99,255,.08);border-left:3px solid var(--primary);padding:12px 14px;border-radius:0 8px 8px 0;font-size:13px;color:var(--text2);line-height:1.6;margin-bottom:16px">
+        <strong style="color:var(--text)">使用方式</strong><br>
+        1. 下載範本 Excel（已含表頭與一筆範例）<br>
+        2. 填入資料（每列一筆，可一次數十筆）<br>
+        3. 上傳填好的檔案，預覽並確認<br>
+        4. 按「全部建檔」一鍵建立所有支出紀錄
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin:20px 0">
+        <button class="btn btn-s" onclick="downloadExpenseTemplate()">⬇️ 下載範本</button>
+        <button class="btn btn-p" onclick="document.getElementById('xlsxFileInput').click()">⬆️ 上傳 Excel</button>
+        <input type="file" id="xlsxFileInput" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleXlsxUpload(event)">
+      </div>
+      <div style="font-size:12px;color:var(--text3);padding:12px;background:var(--card);border-radius:10px;line-height:1.7">
+        <strong style="color:var(--text2)">欄位說明</strong>：<br>
+        • <strong>日期</strong>（必填）：YYYY-MM-DD，或 Excel 日期格式<br>
+        • <strong>類別</strong>（必填）：若未在現有類別則自動新增<br>
+        • <strong>金額</strong>（必填）：數字<br>
+        • <strong>幣別</strong>：TWD / USD / JPY / EUR / CNY / HKD / KRW，預設 TWD<br>
+        • <strong>帳戶</strong>：輸入帳戶名稱（需先在資產頁建立），找不到則使用第一個可用帳戶<br>
+        • <strong>支付方式</strong>：信用卡 / 現金 / 銀行轉帳 / 電子支付，預設「現金」<br>
+        • <strong>說明、支付對象、使用對象、專案</strong>（選填）
+      </div>
+    </div>
+    <div id="xlsxReviewArea" style="display:none">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+        <h4 style="margin:0">解析結果</h4>
+        <span id="xlsxReviewCount" style="font-size:12px;color:var(--text3)"></span>
+      </div>
+      <div id="xlsxReviewList" style="max-height:50vh;overflow-y:auto"></div>
+      <div class="modal-actions" style="margin-top:16px">
+        <button class="btn btn-s" onclick="closeXlsxImport()">取消</button>
+        <button class="btn btn-s" onclick="resetXlsxImport()">重新上傳</button>
+        <button class="btn btn-p" onclick="saveXlsxImport()">全部建檔</button>
+      </div>
+    </div>
+    <div id="xlsxInitActions" class="modal-actions">
+      <button class="btn btn-s" onclick="closeXlsxImport()">關閉</button>
     </div>
   </div>
 </div>

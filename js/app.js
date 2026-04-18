@@ -4919,6 +4919,268 @@ function saveBillExpenses() {
   }
 }
 
+// ============ Excel 批量匯入支出（v1.10.1） ============
+var _xlsxItems = [];
+var EXPENSE_XLSX_HEADERS = ['日期', '類別', '金額', '幣別', '帳戶', '支付方式', '說明', '支付對象', '使用對象', '專案'];
+
+function openXlsxImport() {
+  resetXlsxImport();
+  document.getElementById('xlsxImportOverlay').classList.add('show');
+}
+function closeXlsxImport() {
+  document.getElementById('xlsxImportOverlay').classList.remove('show');
+  _xlsxItems = [];
+}
+function resetXlsxImport() {
+  _xlsxItems = [];
+  document.getElementById('xlsxIntroArea').style.display = '';
+  document.getElementById('xlsxReviewArea').style.display = 'none';
+  document.getElementById('xlsxInitActions').style.display = '';
+  document.getElementById('xlsxFileInput').value = '';
+}
+
+/** 下載制式化 Excel 範本（含表頭與 1 筆範例） */
+function downloadExpenseTemplate() {
+  if (typeof XLSX === 'undefined') { showToast('SheetJS 尚未載入，請稍後再試', 'warn'); return; }
+  var d = U();
+  var firstAcct = (d.accounts.find(function(a) { return a.type === 'bank' || a.type === 'cash'; }) || d.accounts[0] || {});
+  // 兩筆範例：一筆完整、一筆最小
+  var today = new Date().toISOString().slice(0, 10);
+  var rows = [
+    EXPENSE_XLSX_HEADERS,
+    [today, '餐飲', 250, 'TWD', firstAcct.name || '', '信用卡', '午餐便當', '某便當店', '自己', ''],
+    [today, '交通', 50, 'TWD', firstAcct.name || '', '電子支付', 'MRT', '', '', '']
+  ];
+  var ws = XLSX.utils.aoa_to_sheet(rows);
+  // 欄寬
+  ws['!cols'] = [
+    { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 8 },
+    { wch: 16 }, { wch: 12 }, { wch: 24 }, { wch: 14 }, { wch: 10 }, { wch: 14 }
+  ];
+  // 表頭樣式（SheetJS 社群版不支援樣式寫入，略過）
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '支出');
+  // 第二張工作表：欄位說明
+  var helpRows = [
+    ['欄位', '必填', '說明'],
+    ['日期', '是', 'YYYY-MM-DD，或 Excel 日期格式'],
+    ['類別', '是', '若類別不存在會自動新增到你的類別清單'],
+    ['金額', '是', '數字，支援小數'],
+    ['幣別', '否', 'TWD（預設） / USD / JPY / EUR / CNY / HKD / KRW'],
+    ['帳戶', '否', '請輸入帳戶名稱，需先在資產頁建立；找不到會用第一個可用帳戶'],
+    ['支付方式', '否', '信用卡 / 現金（預設） / 銀行轉帳 / 電子支付'],
+    ['說明', '否', '自由填寫'],
+    ['支付對象', '否', '付給誰，例：某便當店'],
+    ['使用對象', '否', '這筆消費是給誰的'],
+    ['專案', '否', '綁定專案標籤；找不到會忽略（可到財務規劃建立專案）']
+  ];
+  var ws2 = XLSX.utils.aoa_to_sheet(helpRows);
+  ws2['!cols'] = [{ wch: 12 }, { wch: 6 }, { wch: 60 }];
+  XLSX.utils.book_append_sheet(wb, ws2, '欄位說明');
+  XLSX.writeFile(wb, 'RichMark_支出匯入範本_' + today + '.xlsx');
+  showToast('範本已下載，填好後再上傳即可', 'success');
+}
+
+/** 處理上傳檔案 */
+function handleXlsxUpload(event) {
+  var file = event.target.files[0];
+  if (!file) return;
+  if (typeof XLSX === 'undefined') { showToast('SheetJS 尚未載入', 'warn'); return; }
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      var data = new Uint8Array(e.target.result);
+      var wb = XLSX.read(data, { type: 'array', cellDates: true });
+      var sheetName = wb.SheetNames[0];
+      var ws = wb.Sheets[sheetName];
+      var rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' });
+      _xlsxItems = _parseXlsxRows(rows);
+      if (_xlsxItems.length === 0) {
+        showToast('沒有可匯入的資料，請確認有填第一列以下的內容', 'warn');
+        return;
+      }
+      document.getElementById('xlsxIntroArea').style.display = 'none';
+      document.getElementById('xlsxReviewArea').style.display = 'block';
+      document.getElementById('xlsxInitActions').style.display = 'none';
+      renderXlsxReview();
+    } catch (err) {
+      console.error('[XLSX] 解析失敗:', err);
+      showToast('檔案解析失敗：' + (err.message || err), 'error');
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+/** 把 SheetJS rows 轉成 item 物件陣列 */
+function _parseXlsxRows(rows) {
+  if (!rows || rows.length < 2) return [];
+  // 偵測表頭列索引（容忍有空白列在前）
+  var headerIdx = -1;
+  for (var i = 0; i < Math.min(5, rows.length); i++) {
+    var row = rows[i].map(function(x) { return String(x || '').trim(); });
+    if (row.indexOf('日期') >= 0 && row.indexOf('金額') >= 0) {
+      headerIdx = i;
+      break;
+    }
+  }
+  if (headerIdx < 0) return [];
+  var header = rows[headerIdx].map(function(x) { return String(x || '').trim(); });
+  // 建立欄位 → 索引映射
+  var idx = {};
+  EXPENSE_XLSX_HEADERS.forEach(function(h) {
+    idx[h] = header.indexOf(h);
+  });
+
+  var items = [];
+  for (var r = headerIdx + 1; r < rows.length; r++) {
+    var row = rows[r];
+    if (!row || row.every(function(x) { return x === '' || x == null; })) continue; // 空列跳過
+    var get = function(key) {
+      var c = idx[key];
+      return (c >= 0 && row[c] != null) ? String(row[c]).trim() : '';
+    };
+    var dateRaw = get('日期');
+    var amountRaw = get('金額');
+    // 日期處理
+    var date = '';
+    if (dateRaw) {
+      if (/^\d{4}-\d{2}-\d{2}/.test(dateRaw)) {
+        date = dateRaw.slice(0, 10);
+      } else if (/^\d{4}\/\d{1,2}\/\d{1,2}/.test(dateRaw)) {
+        var p = dateRaw.split(/[\/\s]/);
+        date = p[0] + '-' + String(p[1]).padStart(2, '0') + '-' + String(p[2]).padStart(2, '0');
+      } else {
+        // 嘗試 Date 解析
+        var dt = new Date(dateRaw);
+        if (!isNaN(dt.getTime())) date = dt.toISOString().slice(0, 10);
+      }
+    }
+    var amount = parseFloat(String(amountRaw).replace(/[,$\s]/g, '')) || 0;
+    if (!date || amount <= 0) continue;  // 必填不全跳過
+
+    items.push({
+      checked: true,
+      date: date,
+      category: get('類別') || '其他支出',
+      amount: amount,
+      currency: (get('幣別') || 'TWD').toUpperCase(),
+      accountName: get('帳戶'),
+      payMethod: get('支付方式') || '現金',
+      note: get('說明'),
+      payTo: get('支付對象'),
+      usedBy: get('使用對象'),
+      projectName: get('專案'),
+      _rowIndex: r + 1
+    });
+  }
+  return items;
+}
+
+function renderXlsxReview() {
+  var d = U();
+  var listEl = document.getElementById('xlsxReviewList');
+  var countEl = document.getElementById('xlsxReviewCount');
+
+  if (_xlsxItems.length === 0) {
+    listEl.innerHTML = '<p style="color:var(--text3);text-align:center;padding:40px">沒有可匯入的資料</p>';
+    return;
+  }
+  countEl.textContent = '共 ' + _xlsxItems.length + ' 筆';
+
+  // 預先算哪些會 match、哪些找不到
+  var invalid = 0;
+  _xlsxItems.forEach(function(it) {
+    var acct = d.accounts.find(function(a) { return a.name === it.accountName; });
+    it._acctMatched = !!acct;
+    if (!acct && !it.accountName) it._acctMatched = 'empty';  // 未填
+  });
+
+  listEl.innerHTML = _xlsxItems.map(function(item, i) {
+    var amountColor = item.amount > 0 ? 'c-red' : 'c-muted';
+    var acctBadge = item._acctMatched === true
+      ? '<span class="tag tag-green" style="font-size:10px">✓ 已配對</span>'
+      : item._acctMatched === 'empty'
+        ? '<span class="tag tag-blue" style="font-size:10px">未指定</span>'
+        : '<span class="tag tag-orange" style="font-size:10px">未找到「' + item.accountName + '」</span>';
+    return '<div class="bill-item" style="align-items:flex-start">' +
+      '<div class="bill-item-check">' +
+        '<input type="checkbox" ' + (item.checked ? 'checked' : '') + ' onchange="_xlsxItems[' + i + '].checked=this.checked">' +
+      '</div>' +
+      '<div class="bill-item-fields">' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;font-size:13px;margin-bottom:6px">' +
+          '<span style="color:var(--text3)">第 ' + item._rowIndex + ' 列</span>' +
+          '<span><strong>' + item.date + '</strong></span>' +
+          '<span class="tag tag-purple" style="font-size:10px">' + item.category + '</span>' +
+          '<span class="' + amountColor + '" style="font-weight:600">' + fmt(item.amount, item.currency) + '</span>' +
+          '<span style="color:var(--text3)">' + item.payMethod + '</span>' +
+          acctBadge +
+        '</div>' +
+        '<div style="font-size:12px;color:var(--text3);line-height:1.5">' +
+          (item.note ? '💬 ' + item.note + ' ｜ ' : '') +
+          (item.payTo ? '→ ' + item.payTo : '') +
+          (item.usedBy ? ' · 給 ' + item.usedBy : '') +
+          (item.projectName ? ' · 🏷 ' + item.projectName : '') +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
+
+function saveXlsxImport() {
+  var d = U();
+  var checked = _xlsxItems.filter(function(x) { return x.checked; });
+  if (checked.length === 0) { showToast('請至少勾選一筆', 'warn'); return; }
+
+  var count = 0;
+  var newCatsAdded = 0;
+
+  // 建立帳戶名稱 → id 映射
+  var acctByName = {};
+  (d.accounts || []).forEach(function(a) { acctByName[a.name] = a; });
+  // 建立專案名稱 → id 映射
+  var projByName = {};
+  (d.projects || []).forEach(function(p) { projByName[p.name] = p.id; });
+  var fallbackAcct = d.accounts.find(function(a) { return a.type === 'bank' || a.type === 'cash'; }) || d.accounts[0];
+
+  checked.forEach(function(item) {
+    // 自動新增類別
+    if (item.category && d.expenseCategories.indexOf(item.category) === -1) {
+      d.expenseCategories.push(item.category);
+      newCatsAdded++;
+    }
+    // 匹配帳戶
+    var acct = acctByName[item.accountName] || fallbackAcct;
+    // 匹配專案
+    var projectId = item.projectName ? (projByName[item.projectName] || '') : '';
+    var record = {
+      id: genId(),
+      date: item.date,
+      category: item.category || '其他支出',
+      payMethod: item.payMethod,
+      accountId: acct ? acct.id : '',
+      amount: item.amount,
+      currency: item.currency,
+      note: item.note,
+      payTo: item.payTo,
+      usedBy: item.usedBy,
+      transferAccount: '',
+      projectId: projectId,
+      _fromXlsxImport: true
+    };
+    d.expenses.push(record);
+    // 扣除帳戶餘額
+    if (acct) acct.balance -= convert(item.amount, item.currency, acct.currency);
+    count++;
+  });
+
+  save();
+  closeXlsxImport();
+  renderExpense();
+  var msg = '✅ 已匯入 ' + count + ' 筆支出';
+  if (newCatsAdded > 0) msg += '（自動新增 ' + newCatsAdded + ' 個類別）';
+  showToast(msg, 'success');
+}
+
 /** 顯示確認彈窗（取代 confirm） */
 function showConfirmModal(msg, onConfirm) {
   var overlay = document.getElementById('confirmModalOverlay');
