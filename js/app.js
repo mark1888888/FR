@@ -1119,6 +1119,12 @@ function _applySorting(list, table) {
   var st = _sortState[table];
   var col = st.col;
   var dir = st.dir === 'asc' ? 1 : -1;
+  // 帳戶排序：先建 id→name 映射表，避免每次比較都查找
+  var acctMap = null;
+  if (col === 'account') {
+    acctMap = {};
+    ((DB && DB.accounts) || []).forEach(function(a) { acctMap[a.id] = a.name || ''; });
+  }
   return list.slice().sort(function(a, b) {
     var va, vb;
     switch (col) {
@@ -1130,6 +1136,7 @@ function _applySorting(list, table) {
       case 'amount': return (a.amount - b.amount) * dir;
       case 'currency': va = a.currency || ''; vb = b.currency || ''; return va.localeCompare(vb) * dir;
       case 'payMethod': va = a.payMethod || ''; vb = b.payMethod || ''; return va.localeCompare(vb) * dir;
+      case 'account': va = acctMap[a.accountId] || ''; vb = acctMap[b.accountId] || ''; return va.localeCompare(vb) * dir;
       default: return 0;
     }
   });
@@ -1157,7 +1164,8 @@ function renderIncome() {
     '<th class="sortable" onclick="toggleSort(\'income\',\'usedBy\')">使用對象' + _sortIndicator('income','usedBy') + '</th>' +
     '<th class="sortable" onclick="toggleSort(\'income\',\'amount\')">金額' + _sortIndicator('income','amount') + '</th>' +
     '<th class="sortable" onclick="toggleSort(\'income\',\'currency\')">幣別' + _sortIndicator('income','currency') + '</th>' +
-    '<th>帳戶</th><th>操作</th></tr>';
+    '<th class="sortable" onclick="toggleSort(\'income\',\'account\')">帳戶' + _sortIndicator('income','account') + '</th>' +
+    '<th>操作</th></tr>';
 
   document.getElementById('incTable').innerHTML = list.length ? list.map(function(i) {
     var ac = d.accounts.find(function(a) { return a.id === i.accountId; });
@@ -1208,7 +1216,8 @@ function renderExpense() {
     '<th class="sortable" onclick="toggleSort(\'expense\',\'amount\')">金額' + _sortIndicator('expense','amount') + '</th>' +
     '<th class="sortable" onclick="toggleSort(\'expense\',\'currency\')">幣別' + _sortIndicator('expense','currency') + '</th>' +
     '<th class="sortable" onclick="toggleSort(\'expense\',\'payMethod\')">支付方式' + _sortIndicator('expense','payMethod') + '</th>' +
-    '<th>帳戶</th><th>操作</th></tr>';
+    '<th class="sortable" onclick="toggleSort(\'expense\',\'account\')">帳戶' + _sortIndicator('expense','account') + '</th>' +
+    '<th>操作</th></tr>';
 
   document.getElementById('expTable').innerHTML = list.length ? list.map(function(e) {
     var ac = d.accounts.find(function(a) { return a.id === e.accountId; });
@@ -1884,6 +1893,31 @@ function renderAnalysis() {
   drawPie('usedByPieChart', 'usedByPieLegend', groupByField(allItems, 'usedBy', cur), cur, true);
 
   drawBarChart('expBarChart', groupByCategory(exp, cur), cur);
+
+  // v1.10.6：各信用卡支出排行（依 accountId 對應 credit type 帳戶加總）
+  var creditCards = d.accounts.filter(function(a) { return a.type === 'credit'; });
+  var ccBarContainer = document.getElementById('ccBarContainer');
+  if (ccBarContainer) {
+    if (creditCards.length === 0) {
+      ccBarContainer.style.display = 'none';
+    } else {
+      ccBarContainer.style.display = '';
+      var ccData = creditCards.map(function(c) {
+        var sum = exp
+          .filter(function(e) { return e.accountId === c.id; })
+          .reduce(function(s, e) { return s + convert(e.amount, e.currency, cur); }, 0);
+        var label = c.name + (c.institution ? '（' + c.institution + '）' : '');
+        return [label, sum];
+      }).filter(function(p) { return p[1] > 0; })
+        .sort(function(a, b) { return b[1] - a[1]; });
+      if (ccData.length === 0) {
+        document.getElementById('ccBarChart').innerHTML = '<p style="color:var(--text3);text-align:center;padding:20px">此期間無信用卡支出</p>';
+      } else {
+        drawBarChart('ccBarChart', ccData, cur);
+      }
+    }
+  }
+
   drawMonthlyChart(cur);
 }
 
@@ -4215,6 +4249,7 @@ function renderCategoryList(containerId, cats, type) {
       return '<div class="sub-cat-row">' +
         '<span class="sub-cat-dot">·</span>' +
         '<span class="cat-name">' + sub + '</span>' +
+        '<span class="edit-btn" onclick="renameSubCategory(\'' + esc + '\',' + si + ')" title="修改名稱">✏️</span>' +
         '<span class="del-btn" onclick="removeSubCategory(\'' + esc + '\',' + si + ')">✕</span>' +
         '</div>';
     }).join('');
@@ -4223,6 +4258,7 @@ function renderCategoryList(containerId, cats, type) {
         '<span class="cat-icon-btn" onclick="openIconPicker(\'' + esc + '\')" title="更改圖示">' + getIcon(cat) + '</span>' +
         '<span class="cat-name">' + cat + '</span>' +
         '<span class="sub-cat-toggle" onclick="toggleSubCatInput(\'' + esc + '\')" title="新增子類別">＋</span>' +
+        '<span class="edit-btn" onclick="renameCategory(\'' + type + '\',' + idx + ')" title="修改名稱">✏️</span>' +
         '<span class="del-btn" onclick="removeCategory(\'' + type + '\',' + idx + ')">✕</span>' +
       '</div>' +
       subHtml +
@@ -4232,6 +4268,82 @@ function renderCategoryList(containerId, cats, type) {
       '</div>' +
       '</div>';
   }).join('');
+}
+
+/** 修改主類別名稱，並連動更新所有使用該類別的 incomes/expenses */
+function renameCategory(type, idx) {
+  var d = U();
+  var cats = type === 'income' ? d.incomeCategories : d.expenseCategories;
+  var oldName = cats[idx];
+  if (!oldName) return;
+  var newName = prompt('修改類別名稱：', oldName);
+  if (newName === null) return;
+  newName = newName.trim();
+  if (!newName) { alert('名稱不能為空'); return; }
+  if (newName === oldName) return;
+  if (cats.indexOf(newName) >= 0) { alert('類別「' + newName + '」已存在'); return; }
+  cats[idx] = newName;
+  // 搬移子類別
+  if (d.subCategories && d.subCategories[oldName]) {
+    d.subCategories[newName] = d.subCategories[oldName];
+    delete d.subCategories[oldName];
+  }
+  // 搬移圖示
+  if (d.categoryIcons && d.categoryIcons[oldName]) {
+    d.categoryIcons[newName] = d.categoryIcons[oldName];
+    delete d.categoryIcons[oldName];
+  }
+  // 更新所有相關記錄
+  var updated = 0;
+  var lists = type === 'income' ? [d.incomes] : [d.expenses];
+  lists.forEach(function(arr) {
+    (arr || []).forEach(function(r) {
+      if (r.category === oldName) { r.category = newName; updated++; }
+      else if (r.category && r.category.indexOf(oldName + ' > ') === 0) {
+        r.category = newName + ' > ' + r.category.slice(oldName.length + 3);
+        updated++;
+      }
+    });
+  });
+  // 定期收支也要更新
+  (d.recurring || []).forEach(function(r) {
+    if (r.type === type && (r.category === oldName || (r.category && r.category.indexOf(oldName + ' > ') === 0))) {
+      r.category = r.category === oldName ? newName : newName + ' > ' + r.category.slice(oldName.length + 3);
+      updated++;
+    }
+  });
+  save();
+  loadCategories();
+  showToast('類別改名：「' + oldName + '」→「' + newName + '」（連動更新 ' + updated + ' 筆）');
+}
+
+/** 修改子類別名稱，並連動更新 */
+function renameSubCategory(cat, idx) {
+  var d = U();
+  if (!d.subCategories || !d.subCategories[cat]) return;
+  var oldName = d.subCategories[cat][idx];
+  if (!oldName) return;
+  var newName = prompt('修改子類別名稱：', oldName);
+  if (newName === null) return;
+  newName = newName.trim();
+  if (!newName) { alert('名稱不能為空'); return; }
+  if (newName === oldName) return;
+  if (d.subCategories[cat].indexOf(newName) >= 0) { alert('子類別「' + newName + '」已存在於「' + cat + '」下'); return; }
+  d.subCategories[cat][idx] = newName;
+  var oldCombo = cat + ' > ' + oldName;
+  var newCombo = cat + ' > ' + newName;
+  var updated = 0;
+  ['incomes', 'expenses'].forEach(function(key) {
+    (d[key] || []).forEach(function(r) {
+      if (r.category === oldCombo) { r.category = newCombo; updated++; }
+    });
+  });
+  (d.recurring || []).forEach(function(r) {
+    if (r.category === oldCombo) { r.category = newCombo; updated++; }
+  });
+  save();
+  loadCategories();
+  showToast('子類別改名：「' + oldName + '」→「' + newName + '」（連動更新 ' + updated + ' 筆）');
 }
 
 function addCategory(type) {
