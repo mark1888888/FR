@@ -529,6 +529,7 @@ function enterApp() {
   renderSidebarUser();
   renderSettingsProfile();
   renderImportBatchList();
+  renderRecentUpdates();
   var se = document.getElementById('settingsEmail');
   if (se) se.textContent = currentUser;
   initMonthSelectors();
@@ -2831,6 +2832,33 @@ function _renderPlanTab(tab) {
 }
 
 // ============ B. 專案標籤 ============
+// v1.10.9：專案 emoji 預設清單
+var PROJECT_EMOJI_PRESETS = [
+  '📁','🏠','🛋','🧳','✈️','🎁','💍','👶',
+  '🚗','🏍','💻','📚','🎓','🏥','🎉','💰',
+  '🎯','🏗','🛒','🍼','🐾','🎨','⚽','🎵',
+  '📷','🎬','💪','🌱','🍜','☕','🎮','💼'
+];
+
+function _pickProjectEmoji(emoji, el) {
+  document.querySelectorAll('#projectEmojiGrid .avatar-emoji-opt').forEach(function(x) { x.classList.remove('selected'); });
+  if (el) el.classList.add('selected');
+  var inp = document.getElementById('f_pjEmoji');
+  if (inp) inp.value = emoji;
+  var pv = document.getElementById('projectEmojiPreview');
+  if (pv) pv.textContent = emoji;
+}
+
+function _onProjectEmojiInput() {
+  var inp = document.getElementById('f_pjEmoji');
+  var pv = document.getElementById('projectEmojiPreview');
+  if (pv) pv.textContent = inp.value || '📁';
+  // 取消 grid 選中狀態
+  document.querySelectorAll('#projectEmojiGrid .avatar-emoji-opt').forEach(function(x) {
+    x.classList.toggle('selected', x.textContent === inp.value);
+  });
+}
+
 function renderPlanProjects() {
   var d = U();
   var projects = d.projects || [];
@@ -2857,11 +2885,13 @@ function renderPlanProjects() {
       var pct = p.budget > 0 ? Math.min(100, (agg.expense / convert(p.budget, p.currency || 'TWD', 'TWD')) * 100) : 0;
       var color = agg.net >= 0 ? 'c-green' : 'c-red';
       var statusTag = p.status === 'closed' ? '<span class="tag tag-blue" style="margin-left:6px">已結案</span>' : '';
-      return '<div class="stat-card" style="cursor:pointer" onclick="editPlanProject(\'' + p.id + '\')">' +
+      return '<div class="stat-card" style="cursor:pointer;position:relative" onclick="openProjectAnalysis(\'' + p.id + '\')">' +
+        '<span class="edit-btn" style="position:absolute;top:8px;right:8px;min-width:28px;min-height:28px;z-index:1" onclick="event.stopPropagation();editPlanProject(\'' + p.id + '\')" title="編輯">✏️</span>' +
         '<div class="label">' + (p.emoji || '📁') + ' ' + p.name + statusTag + '</div>' +
         '<div class="value ' + color + '">' + (agg.net >= 0 ? '+' : '') + fmt(agg.net, 'TWD') + '</div>' +
         '<div class="sub">收 ' + fmt(agg.income, 'TWD') + '｜支 ' + fmt(agg.expense, 'TWD') + '｜' + agg.count + ' 筆</div>' +
         (p.budget > 0 ? '<div style="margin-top:8px;background:var(--border);border-radius:4px;height:6px;overflow:hidden"><div style="height:100%;background:' + (pct > 100 ? '#ef4444' : 'var(--primary)') + ';width:' + pct + '%"></div></div><div style="font-size:11px;color:var(--text3);margin-top:4px">預算 ' + fmt(p.budget, p.currency || 'TWD') + '｜已用 ' + pct.toFixed(0) + '%</div>' : '') +
+        '<div style="font-size:11px;color:var(--primary-light);margin-top:8px">📊 點擊查看分析</div>' +
         '</div>';
     }).join('') + '</div>';
   }
@@ -2869,6 +2899,121 @@ function renderPlanProjects() {
 }
 
 function editPlanProject(id) { openModal('planProject', id); }
+
+// ============ 專案分析 Modal (v1.10.9) ============
+function closeProjectAnalysis() {
+  document.getElementById('projectAnalysisOverlay').classList.remove('show');
+}
+
+function openProjectAnalysis(projectId) {
+  var d = U();
+  var p = (d.projects || []).find(function(x) { return x.id === projectId; });
+  if (!p) return;
+
+  // 該專案的所有收入與支出
+  var incomes = (d.incomes || []).filter(function(i) { return i.projectId === projectId; });
+  var expenses = (d.expenses || []).filter(function(e) { return e.projectId === projectId; });
+  var totalInc = incomes.reduce(function(s, i) { return s + convert(i.amount, i.currency, 'TWD'); }, 0);
+  var totalExp = expenses.reduce(function(s, e) { return s + convert(e.amount, e.currency, 'TWD'); }, 0);
+  var net = totalInc - totalExp;
+  var count = incomes.length + expenses.length;
+
+  // 預算使用率
+  var budgetTWD = p.budget ? convert(p.budget, p.currency || 'TWD', 'TWD') : 0;
+  var usedPct = budgetTWD > 0 ? Math.min(100, (totalExp / budgetTWD) * 100) : 0;
+  var overBudget = budgetTWD > 0 && totalExp > budgetTWD;
+
+  // 支出依類別分組
+  var catMap = {};
+  expenses.forEach(function(e) {
+    var mainCat = (e.category || '未分類').split(' > ')[0];
+    catMap[mainCat] = (catMap[mainCat] || 0) + convert(e.amount, e.currency, 'TWD');
+  });
+  var catData = Object.entries(catMap).sort(function(a, b) { return b[1] - a[1]; });
+
+  // 每月支出時間序列
+  var monthMap = {};
+  expenses.forEach(function(e) {
+    var m = (e.date || '').slice(0, 7);
+    if (m) monthMap[m] = (monthMap[m] || 0) + convert(e.amount, e.currency, 'TWD');
+  });
+  var monthKeys = Object.keys(monthMap).sort();
+
+  var statusTag = p.status === 'closed' ? '<span class="tag tag-blue" style="margin-left:8px;vertical-align:middle">已結案</span>' : '<span class="tag tag-green" style="margin-left:8px;vertical-align:middle">進行中</span>';
+  var periodStr = [p.startDate, p.endDate].filter(Boolean).join(' ~ ') || '未設定期間';
+
+  var html = '<div style="display:flex;align-items:center;gap:14px;margin-bottom:16px;flex-wrap:wrap">' +
+    '<div style="width:56px;height:56px;display:flex;align-items:center;justify-content:center;font-size:36px;background:var(--card);border:2px solid var(--primary);border-radius:14px;flex-shrink:0">' + (p.emoji || '📁') + '</div>' +
+    '<div style="flex:1;min-width:0">' +
+      '<h3 style="margin:0;font-size:20px">' + p.name + statusTag + '</h3>' +
+      '<div style="font-size:12px;color:var(--text3);margin-top:4px">📅 ' + periodStr + (p.note ? ' · ' + p.note : '') + '</div>' +
+    '</div>' +
+  '</div>';
+
+  // 統計卡
+  html += '<div class="stat-grid" style="margin-bottom:16px">' +
+    '<div class="stat-card"><div class="label">收入</div><div class="value c-green">' + fmt(totalInc, 'TWD') + '</div><div class="sub">' + incomes.length + ' 筆</div></div>' +
+    '<div class="stat-card"><div class="label">支出</div><div class="value c-red">' + fmt(totalExp, 'TWD') + '</div><div class="sub">' + expenses.length + ' 筆</div></div>' +
+    '<div class="stat-card"><div class="label">淨收支</div><div class="value ' + (net >= 0 ? 'c-green' : 'c-red') + '">' + (net >= 0 ? '+' : '') + fmt(net, 'TWD') + '</div><div class="sub">共 ' + count + ' 筆</div></div>' +
+    (budgetTWD > 0
+      ? '<div class="stat-card"><div class="label">預算使用率</div><div class="value ' + (overBudget ? 'c-red' : 'c-primary') + '">' + usedPct.toFixed(1) + '%</div><div class="sub">' + fmt(totalExp, 'TWD') + ' / ' + fmt(budgetTWD, 'TWD') + '</div></div>'
+      : '<div class="stat-card"><div class="label">預算</div><div class="value c-muted">未設定</div><div class="sub">—</div></div>') +
+  '</div>';
+
+  // 若有支出才顯示圖表區塊
+  if (expenses.length > 0) {
+    html += '<div class="dual-grid" style="margin-bottom:16px">' +
+      '<div class="chart-container" style="margin:0"><h3 style="font-size:14px">支出類別分佈</h3>' +
+        '<div class="pie-chart-wrap">' +
+          '<canvas id="projPieChart" width="180" height="180"></canvas>' +
+          '<div class="pie-legend" id="projPieLegend"></div>' +
+        '</div></div>' +
+      '<div class="chart-container" style="margin:0"><h3 style="font-size:14px">支出類別排行</h3>' +
+        '<div id="projBarChart"></div>' +
+      '</div>' +
+    '</div>';
+
+    if (monthKeys.length >= 2) {
+      html += '<div class="chart-container" style="margin-bottom:16px"><h3 style="font-size:14px">每月支出走勢</h3>' +
+        '<div id="projMonthlyChart"></div></div>';
+    }
+  } else {
+    html += '<div style="text-align:center;color:var(--text3);padding:40px;background:var(--card);border:1px dashed var(--border);border-radius:12px;margin-bottom:16px">💡 此專案尚無支出記錄；請在新增收支時選擇此專案標籤以開始追蹤</div>';
+  }
+
+  document.getElementById('projectAnalysisBody').innerHTML = html;
+  document.getElementById('projAnalEditBtn').onclick = function() {
+    closeProjectAnalysis();
+    editPlanProject(projectId);
+  };
+  document.getElementById('projectAnalysisOverlay').classList.add('show');
+
+  // 繪圖（等 DOM 就緒後執行）
+  setTimeout(function() {
+    if (expenses.length > 0) {
+      drawPie('projPieChart', 'projPieLegend', catData, 'TWD', false, true);
+      drawBarChart('projBarChart', catData.slice(0, 10), 'TWD');
+      if (monthKeys.length >= 2) {
+        _drawProjectMonthly('projMonthlyChart', monthKeys, monthMap);
+      }
+    }
+  }, 50);
+}
+
+/** 專案每月支出走勢：簡易 bar chart */
+function _drawProjectMonthly(containerId, months, monthMap) {
+  var el = document.getElementById(containerId);
+  if (!el) return;
+  var max = months.reduce(function(m, k) { return Math.max(m, monthMap[k]); }, 0);
+  el.innerHTML = months.map(function(m) {
+    var v = monthMap[m];
+    var pct = max > 0 ? (v / max) * 100 : 0;
+    return '<div class="chart-bar-group">' +
+      '<div class="chart-bar-label"><span>' + m + '</span><span class="c-red" style="font-weight:600">' + fmt(v, 'TWD') + '</span></div>' +
+      '<div class="chart-bar"><div class="chart-bar-fill" style="width:' + pct + '%;background:linear-gradient(90deg,#ef4444,#f59e0b)"></div></div>' +
+      '</div>';
+  }).join('');
+}
 
 function savePlanProject() {
   var d = U();
@@ -3937,9 +4082,19 @@ function openModal(type, editId) {
     var curOptsPj = Object.entries(CURRENCIES).map(function(entry) {
       return '<option value="' + entry[0] + '"' + (editingPj && editingPj.currency === entry[0] ? ' selected' : '') + '>' + entry[0] + ' ' + entry[1] + '</option>';
     }).join('');
+    var pjCurEmoji = editingPj && editingPj.emoji ? editingPj.emoji : '📁';
+    var pjEmojiGrid = PROJECT_EMOJI_PRESETS.map(function(e) {
+      return '<div class="avatar-emoji-opt' + (e === pjCurEmoji ? ' selected' : '') + '" onclick="_pickProjectEmoji(\'' + e + '\',this)">' + e + '</div>';
+    }).join('');
     m.innerHTML = '<h3>' + (editingPj ? '編輯' : '新增') + '專案標籤</h3>' +
-      '<div class="form-row"><div class="form-group"><label>Emoji</label><input type="text" id="f_pjEmoji" maxlength="2" placeholder="📁" value="' + (editingPj ? editingPj.emoji || '📁' : '📁') + '"></div>' +
-      '<div class="form-group" style="flex:3"><label>名稱</label><input type="text" id="f_pjName" placeholder="如：裝修新房、京都旅行" value="' + (editingPj ? editingPj.name || '' : '') + '"></div></div>' +
+      '<div class="form-group"><label>名稱</label><input type="text" id="f_pjName" placeholder="如：裝修新房、京都旅行" value="' + (editingPj ? editingPj.name || '' : '') + '"></div>' +
+      '<div class="form-group"><label>圖示（點選或自訂輸入）</label>' +
+        '<div style="display:flex;gap:10px;align-items:center;margin-bottom:10px">' +
+          '<div id="projectEmojiPreview" style="width:52px;height:52px;display:flex;align-items:center;justify-content:center;font-size:32px;background:var(--card);border:2px solid var(--primary);border-radius:12px;flex-shrink:0">' + pjCurEmoji + '</div>' +
+          '<input type="text" id="f_pjEmoji" maxlength="4" placeholder="自訂 emoji" value="' + pjCurEmoji + '" oninput="_onProjectEmojiInput()" style="flex:1">' +
+        '</div>' +
+        '<div class="avatar-emoji-grid" id="projectEmojiGrid">' + pjEmojiGrid + '</div>' +
+      '</div>' +
       '<div class="form-row"><div class="form-group"><label>開始日期</label><input type="date" id="f_pjStart" value="' + (editingPj ? editingPj.startDate || '' : new Date().toISOString().slice(0, 10)) + '"></div>' +
       '<div class="form-group"><label>結束日期</label><input type="date" id="f_pjEnd" value="' + (editingPj ? editingPj.endDate || '' : '') + '"></div></div>' +
       '<div class="form-row"><div class="form-group"><label>預算金額</label><input type="number" id="f_pjBudget" step="1" value="' + (editingPj ? editingPj.budget || '' : '') + '"></div>' +
@@ -5239,8 +5394,28 @@ function resetXlsxImport() {
   _xlsxItems = [];
   document.getElementById('xlsxIntroArea').style.display = '';
   document.getElementById('xlsxReviewArea').style.display = 'none';
+  var hist = document.getElementById('xlsxHistoryArea');
+  if (hist) hist.style.display = 'none';
   document.getElementById('xlsxInitActions').style.display = '';
   document.getElementById('xlsxFileInput').value = '';
+}
+
+/** 切到「匯入紀錄」視圖 */
+function showXlsxHistory() {
+  document.getElementById('xlsxIntroArea').style.display = 'none';
+  document.getElementById('xlsxReviewArea').style.display = 'none';
+  document.getElementById('xlsxHistoryArea').style.display = 'block';
+  document.getElementById('xlsxInitActions').style.display = 'none';
+  var d = U();
+  document.getElementById('xlsxHistoryCount').textContent = (d.importBatches || []).length;
+  renderImportBatchList();
+}
+
+/** 從「匯入紀錄」返回主畫面 */
+function hideXlsxHistory() {
+  document.getElementById('xlsxHistoryArea').style.display = 'none';
+  document.getElementById('xlsxIntroArea').style.display = '';
+  document.getElementById('xlsxInitActions').style.display = '';
 }
 
 /** 下載制式化 Excel 範本（含表頭與 1 筆範例） */
@@ -5562,6 +5737,128 @@ function deleteImportBatch(batchId) {
       showToast('已刪除 ' + affected.length + ' 筆匯入資料並還原帳戶', 'success');
     }
   );
+}
+
+// ============ 更新紀錄 / CHANGELOG（v1.10.8） ============
+var _changelogCache = null;   // 解析後陣列
+
+/** 抓取並解析 CHANGELOG.md；結果快取於記憶體 */
+async function _fetchChangelog() {
+  if (_changelogCache) return _changelogCache;
+  try {
+    var resp = await fetch('CHANGELOG.md', { cache: 'no-cache' });
+    if (!resp.ok) return [];
+    var text = await resp.text();
+    _changelogCache = _parseChangelog(text);
+    return _changelogCache;
+  } catch (e) {
+    console.warn('[CHANGELOG] 讀取失敗:', e);
+    return [];
+  }
+}
+
+/** 把 CHANGELOG.md 文字切成版本陣列 */
+function _parseChangelog(text) {
+  // 以 "^## " 開頭切分，第一段是主標題跳過
+  var parts = text.split(/\n## /);
+  var versions = [];
+  for (var i = 1; i < parts.length; i++) {
+    var raw = parts[i];
+    var nl = raw.indexOf('\n');
+    var header = nl < 0 ? raw : raw.slice(0, nl);
+    var body = nl < 0 ? '' : raw.slice(nl + 1).trim();
+    // 解析 "v1.10.7 — 2026-04-17 · 標題"
+    var m = header.match(/^v?([\d.]+)\s*[—–\-]\s*(\d{4}-\d{2}-\d{2})\s*(?:[·\-]\s*(.*))?$/);
+    if (!m) continue;
+    versions.push({
+      version: m[1],
+      date: m[2],
+      title: (m[3] || '').trim(),
+      body: body.replace(/\n?---\s*$/, '').trim()   // 去除結尾分隔線
+    });
+  }
+  return versions;
+}
+
+/** 簡易 Markdown → HTML（足夠渲染我們的 CHANGELOG 格式） */
+function _mdToHtml(md) {
+  var html = md
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    // 程式碼 `code`
+    .replace(/`([^`]+)`/g, '<code style="background:rgba(108,99,255,.1);padding:1px 5px;border-radius:4px;font-size:12px">$1</code>')
+    // 粗體 **text**
+    .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+    // 標題 ### / ####
+    .replace(/^####\s+(.+)$/gm, '<h5 style="font-size:13px;margin:10px 0 4px;color:var(--primary-light)">$1</h5>')
+    .replace(/^###\s+(.+)$/gm, '<h4 style="font-size:14px;margin:14px 0 6px;color:var(--text)">$1</h4>');
+  // 清單行轉 <li>
+  var lines = html.split('\n');
+  var out = [];
+  var inList = false;
+  for (var i = 0; i < lines.length; i++) {
+    var ln = lines[i];
+    if (/^[\-*]\s+/.test(ln)) {
+      if (!inList) { out.push('<ul style="margin:4px 0 8px;padding-left:20px">'); inList = true; }
+      out.push('<li style="margin:3px 0">' + ln.replace(/^[\-*]\s+/, '') + '</li>');
+    } else {
+      if (inList) { out.push('</ul>'); inList = false; }
+      if (ln.trim() === '') out.push('<div style="height:6px"></div>');
+      else if (!/^<h/.test(ln)) out.push('<div>' + ln + '</div>');
+      else out.push(ln);
+    }
+  }
+  if (inList) out.push('</ul>');
+  return out.join('');
+}
+
+/** 設定頁「最近更新」區塊：只顯示近 7 天 */
+async function renderRecentUpdates() {
+  var el = document.getElementById('recentUpdatesList');
+  if (!el) return;
+  el.innerHTML = '<p style="color:var(--text3);font-size:13px;text-align:center;padding:16px 0">載入中...</p>';
+  var versions = await _fetchChangelog();
+  if (versions.length === 0) {
+    el.innerHTML = '<p style="color:var(--text3);font-size:13px;text-align:center;padding:16px 0">無法載入更新紀錄</p>';
+    return;
+  }
+  var cutoff = new Date(Date.now() - 7 * 86400 * 1000);
+  var recent = versions.filter(function(v) { return new Date(v.date) >= cutoff; });
+  if (recent.length === 0) recent = versions.slice(0, 1);   // 若一週內無更新，顯示最新一筆
+  el.innerHTML = recent.map(function(v) {
+    return '<div style="padding:10px 12px;border:1px solid var(--border);border-radius:10px;margin-bottom:8px;background:var(--card)">' +
+      '<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px">' +
+        '<strong style="font-size:13px;color:var(--primary-light)">v' + v.version + '</strong>' +
+        '<span style="font-size:11px;color:var(--text3)">' + v.date + '</span>' +
+      '</div>' +
+      '<div style="font-size:13px;color:var(--text);margin-top:4px">' + (v.title || '更新') + '</div>' +
+      '</div>';
+  }).join('');
+}
+
+async function openChangelogModal() {
+  document.getElementById('changelogOverlay').classList.add('show');
+  var body = document.getElementById('changelogBody');
+  body.innerHTML = '<p style="color:var(--text3);text-align:center;padding:40px">載入中...</p>';
+  var versions = await _fetchChangelog();
+  if (versions.length === 0) {
+    body.innerHTML = '<p style="color:var(--text3);text-align:center;padding:40px">無法載入更新紀錄</p>';
+    return;
+  }
+  body.innerHTML = versions.map(function(v) {
+    return '<div style="margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--border)">' +
+      '<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px;margin-bottom:10px">' +
+        '<div><strong style="font-size:16px;color:var(--primary-light)">v' + v.version + '</strong>' +
+          '<span style="margin-left:8px;font-size:14px;color:var(--text)">' + (v.title || '') + '</span></div>' +
+        '<span style="font-size:12px;color:var(--text3)">📅 ' + v.date + '</span>' +
+      '</div>' +
+      '<div style="color:var(--text2);font-size:13px">' + _mdToHtml(v.body) + '</div>' +
+      '</div>';
+  }).join('');
+}
+
+function closeChangelogModal() {
+  document.getElementById('changelogOverlay').classList.remove('show');
 }
 
 /** 顯示確認彈窗（取代 confirm） */

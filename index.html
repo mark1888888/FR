@@ -603,9 +603,10 @@
         </div>
       </div>
       <div class="chart-container" style="margin-top:20px">
-        <h3>📥 批量匯入記錄</h3>
-        <p style="color:var(--text2);font-size:13px;margin-bottom:12px">每次 Excel 匯入都會記錄於此，若不小心匯錯可整批刪除（自動還原帳戶餘額）</p>
-        <div id="importBatchList"></div>
+        <h3>📰 最近更新</h3>
+        <p style="color:var(--text2);font-size:13px;margin-bottom:12px">顯示近 7 天的版本更新；點按鈕可查看完整更新歷史</p>
+        <div id="recentUpdatesList"></div>
+        <button class="btn btn-s btn-sm" style="margin-top:12px" onclick="openChangelogModal()">📜 查看完整更新紀錄</button>
       </div>
       <div class="chart-container" style="margin-top:20px">
         <h3>更改密碼</h3>
@@ -778,6 +779,28 @@
   </div>
 </div>
 
+<!-- 專案分析 Modal -->
+<div class="modal-overlay" id="projectAnalysisOverlay" onclick="if(event.target===this)closeProjectAnalysis()">
+  <div class="modal" style="max-width:800px">
+    <div id="projectAnalysisBody" style="max-height:80vh;overflow-y:auto"></div>
+    <div class="modal-actions" style="margin-top:16px">
+      <button class="btn btn-s" id="projAnalEditBtn">✏️ 編輯專案</button>
+      <button class="btn btn-s" onclick="closeProjectAnalysis()">關閉</button>
+    </div>
+  </div>
+</div>
+
+<!-- 更新紀錄（CHANGELOG） Modal -->
+<div class="modal-overlay" id="changelogOverlay" onclick="if(event.target===this)closeChangelogModal()">
+  <div class="modal" style="max-width:720px">
+    <h3>📜 更新紀錄</h3>
+    <div id="changelogBody" style="max-height:65vh;overflow-y:auto;font-size:13px;line-height:1.65"></div>
+    <div class="modal-actions" style="margin-top:16px">
+      <button class="btn btn-s" onclick="closeChangelogModal()">關閉</button>
+    </div>
+  </div>
+</div>
+
 <!-- Excel 批量匯入 Modal -->
 <div class="modal-overlay" id="xlsxImportOverlay" onclick="if(event.target===this)closeXlsxImport()">
   <div class="modal" style="max-width:760px">
@@ -793,6 +816,7 @@
       <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin:20px 0">
         <button class="btn btn-s" onclick="downloadExpenseTemplate()">⬇️ 下載範本</button>
         <button class="btn btn-p" onclick="document.getElementById('xlsxFileInput').click()">⬆️ 上傳 Excel</button>
+        <button class="btn btn-s" onclick="showXlsxHistory()">📂 匯入紀錄</button>
         <input type="file" id="xlsxFileInput" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleXlsxUpload(event)">
       </div>
       <div style="font-size:12px;color:var(--text3);padding:12px;background:var(--card);border-radius:10px;line-height:1.7">
@@ -804,6 +828,19 @@
         • <strong>帳戶</strong>：輸入帳戶名稱（需先在資產頁建立），找不到則使用第一個可用帳戶<br>
         • <strong>支付方式</strong>：信用卡 / 現金 / 銀行轉帳 / 電子支付，預設「現金」<br>
         • <strong>說明、支付對象、使用對象、專案</strong>（選填）
+      </div>
+    </div>
+    <div id="xlsxHistoryArea" style="display:none">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+        <h4 style="margin:0">📂 匯入紀錄</h4>
+        <span style="font-size:12px;color:var(--text3)">共 <strong id="xlsxHistoryCount">0</strong> 筆</span>
+      </div>
+      <div style="background:rgba(245,158,11,.08);border-left:3px solid var(--orange);padding:10px 14px;border-radius:0 8px 8px 0;font-size:12px;color:var(--text2);margin-bottom:12px">
+        ⚠ 刪除整批會同步移除該批次所有支出紀錄，並還原對應帳戶餘額
+      </div>
+      <div id="importBatchList" style="max-height:50vh;overflow-y:auto"></div>
+      <div class="modal-actions" style="margin-top:16px">
+        <button class="btn btn-s" onclick="hideXlsxHistory()">← 返回</button>
       </div>
     </div>
     <div id="xlsxReviewArea" style="display:none">
