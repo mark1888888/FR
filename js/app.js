@@ -400,6 +400,7 @@ function U() {
   if (!DB.profile) DB.profile = { nickname: '', avatar: '🙂', avatarType: 'emoji' };
   if (!DB.importBatches) DB.importBatches = [];
   if (!DB.lastPortfolioPrices) DB.lastPortfolioPrices = {};
+  if (!DB.lastMetalPrices) DB.lastMetalPrices = {};
   if (!DB.updated_at) DB.updated_at = new Date().toISOString();
   if (!_legacyMigrated) {
     _legacyMigrated = true;
@@ -530,6 +531,9 @@ function enterApp() {
   renderSettingsProfile();
   renderImportBatchList();
   renderRecentUpdates();
+  // v1.11.2：套用動產折舊/保值連動（已快取則立即生效；金屬價抓到後會再觸發一次）
+  var depChanged = _applyDepreciationAndMarket();
+  if (depChanged > 0) save();
   var se = document.getElementById('settingsEmail');
   if (se) se.textContent = currentUser;
   initMonthSelectors();
@@ -1377,6 +1381,16 @@ function renderAssets() {
   };
   document.getElementById('assetTableTitle').textContent = titles[currentAssetTab] || currentAssetTab;
 
+  // v1.11.1：統一 reset 所有區塊狀態，避免切 tab 時殘留
+  var accountWrap = document.getElementById('assetAccountWrap');
+  var assetAddBtn = document.getElementById('assetAddBtn');
+  var recvSection = document.getElementById('receivableSection');
+  var portSection = document.getElementById('portfolioSection');
+  if (accountWrap) accountWrap.style.display = '';
+  if (assetAddBtn) assetAddBtn.parentElement.style.display = '';
+  if (recvSection) recvSection.style.display = 'none';
+  if (portSection) portSection.style.display = 'none';
+
   // 不動產和動產用獨立渲染
   if (currentAssetTab === 'property') {
     _renderPropertyTab(d); return;
@@ -1385,16 +1399,10 @@ function renderAssets() {
     _renderVehicleTab(d); return;
   }
 
-  var accountWrap = document.getElementById('assetAccountWrap');
-  var assetAddBtn = document.getElementById('assetAddBtn');
-  var recvSection = document.getElementById('receivableSection');
-  var portSection = document.getElementById('portfolioSection');
-
   // ===== 投資組合分頁：直接顯示投資組合表 =====
   if (currentAssetTab === 'portfolio') {
     if (accountWrap) accountWrap.style.display = 'none';
     if (assetAddBtn) assetAddBtn.parentElement.style.display = 'none';
-    if (recvSection) recvSection.style.display = 'none';
     if (portSection) portSection.style.display = 'block';
     // 清空原本 assetStats（portfolioStats 自己會填）
     var as = document.getElementById('assetStats');
@@ -1402,7 +1410,6 @@ function renderAssets() {
     renderPortfolio();
     return;
   }
-  if (portSection) portSection.style.display = 'none';
 
   // ===== 應收款/應付款分頁：直接顯示「追蹤」介面，不顯示帳戶表格 =====
   var isRecvPay = (currentAssetTab === 'receivable' || currentAssetTab === 'payable');
@@ -1527,8 +1534,16 @@ function _renderVehicleTab(d) {
   tb.innerHTML = list.length ? list.map(function(v) {
     var pnl = (v.currentValue || 0) - (v.purchasePrice || 0);
     var brandModel = ((v.brand || '') + ' ' + (v.model || '')).trim() || '-';
+    // v1.11.2：顯示價值變動模式標籤
+    var modeTag = '';
+    if (v.valuationMode === 'depreciation' && v.depreciationRate > 0) {
+      modeTag = '<div style="font-size:10px;color:var(--text3);margin-top:2px">🔻 年折舊 ' + v.depreciationRate + '%</div>';
+    } else if (v.valuationMode === 'market' && v.marketLink) {
+      var linkLabel = { gold:'黃金', silver:'白銀', platinum:'鉑金', palladium:'鈀金' }[v.marketLink] || v.marketLink;
+      modeTag = '<div style="font-size:10px;color:var(--text3);margin-top:2px">🔗 ' + linkLabel + (v.marketUnits ? ' × ' + v.marketUnits + ' oz' : '') + '</div>';
+    }
     return '<tr><td><span class="tag">' + (VEHICLE_TYPES[v.subType] || v.subType || '-') + '</span></td>' +
-      '<td style="font-weight:600">' + (v.name || '-') + '</td>' +
+      '<td style="font-weight:600">' + (v.name || '-') + modeTag + '</td>' +
       '<td>' + brandModel + '</td>' +
       '<td>' + (v.purchaseDate || '-') + '</td>' +
       '<td>' + fmt(v.purchasePrice || 0, v.currency || 'TWD') + '</td>' +
@@ -1583,6 +1598,7 @@ function saveVehicle() {
   var d = U();
   if (!d.vehicles) d.vehicles = [];
   var editId = document.getElementById('f_editId').value;
+  var mode = document.getElementById('f_vehMode').value || 'manual';
   var obj = {
     id: editId || genId(),
     subType: document.getElementById('f_vehType').value,
@@ -1593,7 +1609,12 @@ function saveVehicle() {
     purchasePrice: parseFloat(document.getElementById('f_vehPrice').value) || 0,
     currentValue: parseFloat(document.getElementById('f_vehValue').value) || 0,
     currency: document.getElementById('f_vehCur').value,
-    note: document.getElementById('f_vehNote').value.trim()
+    note: document.getElementById('f_vehNote').value.trim(),
+    valuationMode: mode,
+    depreciationRate: mode === 'depreciation' ? (parseFloat(document.getElementById('f_vehDeprRate').value) || 0) : 0,
+    depreciationStart: mode === 'depreciation' ? (document.getElementById('f_vehDeprStart').value || '') : '',
+    marketLink: mode === 'market' ? document.getElementById('f_vehMarketLink').value : '',
+    marketUnits: mode === 'market' ? (parseFloat(document.getElementById('f_vehMarketUnits').value) || 0) : 0
   };
   if (editId) {
     var ex = d.vehicles.find(function(v) { return v.id === editId; });
@@ -1601,8 +1622,55 @@ function saveVehicle() {
   } else {
     d.vehicles.push(obj);
   }
+  // 儲存時立即套用一次計算
+  _applyDepreciationAndMarket();
   save(); closeModal(); renderAssets();
   showToast('✅ 動產資料已儲存', 'success');
+}
+
+/** Modal 內切換「價值變動方式」時顯示/隱藏對應欄位 */
+function _onVehModeChange() {
+  var mode = document.getElementById('f_vehMode').value;
+  var dep = document.getElementById('vehDeprFields');
+  var mkt = document.getElementById('vehMarketFields');
+  if (dep) dep.style.display = mode === 'depreciation' ? 'flex' : 'none';
+  if (mkt) mkt.style.display = mode === 'market' ? 'flex' : 'none';
+}
+
+/** 依折舊率與保值連動更新所有動產的 currentValue（啟動時 + 儲存後呼叫） */
+function _applyDepreciationAndMarket() {
+  var d = DB;
+  if (!d || !d.vehicles) return;
+  var now = new Date();
+  var changed = 0;
+  d.vehicles.forEach(function(v) {
+    if (!v.valuationMode || v.valuationMode === 'manual') return;
+    if (v.valuationMode === 'depreciation') {
+      var rate = (v.depreciationRate || 0) / 100;
+      if (rate <= 0) return;
+      var start = v.depreciationStart || v.purchaseDate;
+      if (!start) return;
+      var startDate = new Date(start);
+      var months = Math.max(0, (now.getFullYear() - startDate.getFullYear()) * 12 + (now.getMonth() - startDate.getMonth()));
+      var years = months / 12;
+      var newVal = (v.purchasePrice || 0) * Math.pow(1 - rate, years);
+      newVal = Math.max(0, Math.round(newVal));
+      if (newVal !== v.currentValue) { v.currentValue = newVal; changed++; }
+    } else if (v.valuationMode === 'market' && v.marketLink && v.marketUnits > 0) {
+      // 從金屬價快取讀 USD/oz
+      var cache = d.lastMetalPrices || {};
+      var usd = cache[v.marketLink];
+      if (!usd || usd <= 0) return;
+      // USD → 該資產幣別
+      var localPrice = convert(usd, 'USD', v.currency || 'TWD');
+      var newVal = Math.round(localPrice * v.marketUnits);
+      if (newVal !== v.currentValue) { v.currentValue = newVal; changed++; }
+    }
+  });
+  if (changed > 0) {
+    console.log('[RichMark] 自動更新 ' + changed + ' 筆動產價值（折舊/保值）');
+  }
+  return changed;
 }
 function editVehicle(id) { openModal('vehicle', id); }
 function deleteVehicle(id) {
@@ -2380,6 +2448,8 @@ async function loadPreciousMetals() {
       function(d) { return d && d.metals; }
     );
     if (md && md.metals) {
+      // v1.11.2：寫入 DB 快取，供保值型資產自動套用
+      if (DB && !DB.lastMetalPrices) DB.lastMetalPrices = {};
       metalDefs.forEach(function(m) {
         if (md.metals[m.key]) {
           metals.push({
@@ -2387,8 +2457,17 @@ async function loadPreciousMetals() {
             price: md.metals[m.key], priceTwd: md.metals[m.key] * usdToTwd,
             change: 0, isOz: true
           });
+          if (DB) DB.lastMetalPrices[m.key] = md.metals[m.key];
         }
       });
+      if (DB && DB.lastMetalPrices) {
+        DB.lastMetalPrices._updatedAt = new Date().toISOString();
+        // 金屬價更新後，重新套用保值型動產估值
+        if (typeof _applyDepreciationAndMarket === 'function') {
+          var changed = _applyDepreciationAndMarket();
+          if (changed > 0) save();
+        }
+      }
     }
   } catch (e) { /* 靜默處理 */ }
 
@@ -4065,6 +4144,16 @@ function openModal(type, editId) {
     var curOptsV = Object.entries(CURRENCIES).map(function(entry) {
       return '<option value="' + entry[0] + '"' + (editingV && editingV.currency === entry[0] ? ' selected' : '') + '>' + entry[0] + ' ' + entry[1] + '</option>';
     }).join('');
+    var vMode = (editingV && editingV.valuationMode) || 'manual';
+    var vLink = (editingV && editingV.marketLink) || 'gold';
+    var metalOpts = [
+      ['gold', '🟡 黃金 (XAU)'],
+      ['silver', '⚪ 白銀 (XAG)'],
+      ['platinum', '⚫ 鉑金 (XPT)'],
+      ['palladium', '🔘 鈀金 (XPD)']
+    ].map(function(x) {
+      return '<option value="' + x[0] + '"' + (vLink === x[0] ? ' selected' : '') + '>' + x[1] + '</option>';
+    }).join('');
     m.innerHTML = '<h3>' + (editingV ? '編輯' : '新增') + '動產</h3>' +
       '<div class="form-row"><div class="form-group"><label>類型</label><select id="f_vehType">' + vehTypeOpts + '</select></div>' +
       '<div class="form-group"><label>名稱</label><input type="text" id="f_vehName" placeholder="如：Toyota Camry" value="' + (editingV ? editingV.name || '' : '') + '"></div></div>' +
@@ -4074,6 +4163,25 @@ function openModal(type, editId) {
       '<div class="form-row"><div class="form-group"><label>購入價格</label><input type="number" id="f_vehPrice" step="1" value="' + (editingV ? editingV.purchasePrice || '' : '') + '"></div>' +
       '<div class="form-group"><label>當前價值</label><input type="number" id="f_vehValue" step="1" value="' + (editingV ? editingV.currentValue || '' : '') + '"></div></div>' +
       '<div class="form-group"><label>幣別</label><select id="f_vehCur">' + curOptsV + '</select></div>' +
+      // v1.11.2：價值變動方式
+      '<div class="form-group"><label>價值變動方式</label><select id="f_vehMode" onchange="_onVehModeChange()">' +
+        '<option value="manual"' + (vMode === 'manual' ? ' selected' : '') + '>🔧 手動更新（預設）</option>' +
+        '<option value="depreciation"' + (vMode === 'depreciation' ? ' selected' : '') + '>🔻 折舊型（系統自動按月扣減）</option>' +
+        '<option value="market"' + (vMode === 'market' ? ' selected' : '') + '>🔗 保值型（連動國際金價/行情）</option>' +
+      '</select></div>' +
+      // 折舊型欄位
+      '<div class="form-row" id="vehDeprFields" style="display:' + (vMode === 'depreciation' ? 'flex' : 'none') + '">' +
+        '<div class="form-group"><label>年折舊率 (%) <span style="font-size:11px;color:var(--text3)">汽車常用 15–20</span></label>' +
+          '<input type="number" id="f_vehDeprRate" step="0.1" min="0" max="100" placeholder="例：15" value="' + (editingV && editingV.depreciationRate ? editingV.depreciationRate : (vMode === 'depreciation' ? 15 : '')) + '"></div>' +
+        '<div class="form-group"><label>折舊起算日</label>' +
+          '<input type="date" id="f_vehDeprStart" value="' + (editingV && editingV.depreciationStart ? editingV.depreciationStart : (editingV && editingV.purchaseDate ? editingV.purchaseDate : '')) + '"></div>' +
+      '</div>' +
+      // 保值型欄位
+      '<div class="form-row" id="vehMarketFields" style="display:' + (vMode === 'market' ? 'flex' : 'none') + '">' +
+        '<div class="form-group"><label>連動標的</label><select id="f_vehMarketLink">' + metalOpts + '</select></div>' +
+        '<div class="form-group"><label>持有單位（盎司 oz） <span style="font-size:11px;color:var(--text3)">若留空則只手動更新</span></label>' +
+          '<input type="number" id="f_vehMarketUnits" step="0.001" min="0" placeholder="例：5.0" value="' + (editingV && editingV.marketUnits ? editingV.marketUnits : '') + '"></div>' +
+      '</div>' +
       '<div class="form-group"><label>備註</label><input type="text" id="f_vehNote" value="' + (editingV ? editingV.note || '' : '') + '"></div>' +
       '<input type="hidden" id="f_editId" value="' + (editId || '') + '">' +
       '<div class="modal-actions"><button class="btn btn-s" onclick="closeModal()">取消</button><button class="btn btn-p" onclick="saveVehicle()">儲存</button></div>';
@@ -4774,13 +4882,19 @@ function resetBillScanner() {
 document.addEventListener('DOMContentLoaded', function() {
   // 啟動股票開盤自動刷新（每分鐘 tick，實際刷新節奏 10 分鐘 + 需在投資頁 + 開盤中）
   startStockAutoRefresh();
-  // v1.10.4：啟動時優先使用 DB 快取（上次儲存的市值）顯示，只在開盤時段才背景刷新
+  // v1.11.0：啟動時投資市值邏輯
+  //   - 無快取（新使用者或從未抓成功）→ 必 fetch 一次，不管開不開盤
+  //   - 有快取但開盤中 → fetch 刷新到最新
+  //   - 有快取且非開盤 → 用快取不發請求
   setTimeout(function() {
     if (!DB || !DB.portfolio || DB.portfolio.length === 0) return;
-    if (isTwStockMarketOpen()) {
+    var cache = DB.lastPortfolioPrices || {};
+    var hasCache = Object.keys(cache).some(function(k) {
+      return k !== '_updatedAt' && cache[k] > 0;
+    });
+    if (!hasCache || isTwStockMarketOpen()) {
       fetchPortfolioPrices().then(function() { rerenderActivePage(); });
     }
-    // 非開盤時間：不發請求，直接用 DB.lastPortfolioPrices 的快取值顯示
   }, 500);
 
   var uploadArea = document.getElementById('billUploadArea');
